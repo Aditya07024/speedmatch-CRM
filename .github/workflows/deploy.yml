@@ -58,6 +58,7 @@ jobs:
             if [ -s "$HOME/.profile" ]; then . "$HOME/.profile"; fi
             if [ -s "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi
             export PATH="$PATH:/usr/local/bin:/usr/bin:$HOME/.local/share/pnpm"
+            export CI=true
 
             # Verify or install pnpm & pm2 if missing
             if ! command -v pnpm >/dev/null 2>&1; then npm install -g pnpm; fi
