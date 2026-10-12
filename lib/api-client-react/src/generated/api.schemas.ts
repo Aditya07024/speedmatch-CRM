@@ -225,6 +225,8 @@ export interface TeamMember {
   joinedAt: string;
   /** @nullable */
   avatarUrl?: string | null;
+  /** @nullable */
+  requestMessage?: string | null;
 }
 
 export interface Invitation {

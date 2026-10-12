@@ -18,6 +18,7 @@ export const teamMembersTable = pgTable("speedmatch_team_members", {
   companyId: integer("company_id"),
   status: text("status").notNull().default("pending"),
   avatarUrl: text("avatar_url"),
+  requestMessage: text("request_message"),
   joinedAt: timestamp("joined_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

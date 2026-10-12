@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
 import { Route, Switch, Redirect, Router as WouterRouter, Link, useLocation } from 'wouter';
+import { ClerkProvider, SignIn as ClerkSignIn, SignUp as ClerkSignUp, useUser } from '@clerk/clerk-react';
 import {
   Activity as ActivityIcon, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CalendarDays,
   Check, CheckCheck, ChevronDown, ChevronRight, Clock3, Compass,
   ContactRound, Ellipsis, Filter, Inbox, LayoutDashboard, LogOut, MessageCircle, Plus, Search,
   Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
-  Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText
+  Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText,
+  ShieldAlert, KeyRound, AlertCircle, UserCheck
 } from 'lucide-react';
 import {
   useGetDashboardSummary, getGetDashboardSummaryQueryKey, useGetDashboardActivity, getGetDashboardActivityQueryKey,
@@ -32,18 +34,29 @@ const client = new QueryClient({
   defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } },
 });
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+declare global {
+  interface Window {
+    Clerk?: any;
+  }
+}
+
 type AnyRecord = Record<string, any>;
 
 // ---------------------------------------------------------------------------
-// Local authentication (email + password, cookie session handled by the API)
+// Authentication & Access Control (Clerk Sync + Super Admin Password Portal)
 // ---------------------------------------------------------------------------
 type AuthState = {
   isLoaded: boolean;
   member: AnyRecord | null;
+  clerkKey: string;
   refresh: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (name: string, email: string, password: string, initiationCode?: string) => Promise<void>;
   signOut: () => Promise<void>;
+  superAdminLogin: (password: string, email?: string) => Promise<void>;
+  requestAccess: (message: string) => Promise<void>;
+  superAdminModalOpen: boolean;
+  setSuperAdminModalOpen: (open: boolean) => void;
 };
 const AuthContext = createContext<AuthState | null>(null);
 function useAuth() {
@@ -64,6 +77,12 @@ async function authRequest(path: string, body: AnyRecord) {
 function AuthProvider({ children }: { children: ReactNode }) {
   const [isLoaded, setLoaded] = useState(false);
   const [member, setMember] = useState<AnyRecord | null>(null);
+  const [superAdminModalOpen, setSuperAdminModalOpen] = useState(false);
+  const [clerkKey, setClerkKey] = useState<string>(() => {
+    const envKey = (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || '').trim();
+    return envKey.startsWith('pk_') && !envKey.includes('your_publishable_key') ? envKey : '';
+  });
+
   const refresh = useCallback(async () => {
     try {
       const res = await fetch('/api/team/me', { credentials: 'include' });
@@ -71,14 +90,259 @@ function AuthProvider({ children }: { children: ReactNode }) {
     } catch { setMember(null); }
     setLoaded(true);
   }, []);
-  useEffect(() => { void refresh(); }, [refresh]);
+
+  useEffect(() => {
+    void refresh();
+    // Also fetch runtime auth config in case key is loaded via server .env
+    fetch('/api/auth/config')
+      .then(res => res.json())
+      .then(data => {
+        if (data?.publishableKey && String(data.publishableKey).startsWith('pk_') && !String(data.publishableKey).includes('your_publishable_key')) {
+          setClerkKey(data.publishableKey);
+        }
+      })
+      .catch(() => {});
+  }, [refresh]);
+
   const value: AuthState = {
-    isLoaded, member, refresh,
+    isLoaded, member, clerkKey, refresh,
+    superAdminModalOpen, setSuperAdminModalOpen,
     signIn: async (email, password) => { await authRequest('sign-in', { email, password }); client.clear(); await refresh(); },
     signUp: async (name, email, password, initiationCode) => { await authRequest('sign-up', { name, email, password, initiationCode }); client.clear(); await refresh(); },
-    signOut: async () => { await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' }); client.clear(); setMember(null); },
+    superAdminLogin: async (password, email) => {
+      await authRequest('super-admin-login', { password, email });
+      client.clear();
+      await refresh();
+    },
+    requestAccess: async (message) => {
+      await authRequest('request-access', { message });
+      await refresh();
+    },
+    signOut: async () => {
+      try {
+        if (window.Clerk) {
+          await window.Clerk.signOut();
+        }
+      } catch {}
+      await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' }).catch(() => {});
+      client.clear();
+      setMember(null);
+      window.location.href = `${basePath}/sign-in`;
+    },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+function ClerkSyncBridge() {
+  const { refresh, isLoaded: appLoaded } = useAuth();
+  const { isLoaded: clerkLoaded, isSignedIn, user } = useUser();
+  const lastSyncedId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (clerkLoaded && isSignedIn && user) {
+      const email = user.primaryEmailAddress?.emailAddress;
+      if (email && lastSyncedId.current !== user.id) {
+        lastSyncedId.current = user.id;
+        void fetch('/api/auth/clerk-sync', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email,
+            name: user.fullName || user.firstName || email.split('@')[0],
+            clerkId: user.id,
+            avatarUrl: user.imageUrl,
+          }),
+        }).then(async () => {
+          client.clear();
+          await refresh();
+        }).catch(() => {});
+      }
+    } else if (clerkLoaded && !isSignedIn) {
+      lastSyncedId.current = null;
+    }
+  }, [clerkLoaded, isSignedIn, user, refresh]);
+
+  return null;
+}
+
+function SuperAdminModal() {
+  const { superAdminModalOpen, setSuperAdminModalOpen, superAdminLogin } = useAuth();
+  const [, setLocation] = useLocation();
+  const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('superadmin@speedmatch.com');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+
+  if (!superAdminModalOpen) return null;
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setBusy(true);
+    try {
+      await superAdminLogin(password, email);
+      setSuperAdminModalOpen(false);
+      setPassword('');
+      setLocation('/super-admin');
+    } catch (err: any) {
+      setError(err?.message || 'Invalid Super Admin password.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Dialog title="Super Admin Portal Access" onClose={() => setSuperAdminModalOpen(false)} width="max-w-md">
+      <form onSubmit={handleSubmit} className="space-y-4 p-6">
+        <div className="flex items-center gap-3 rounded-xl border border-amber-200 bg-amber-50/70 p-3.5 text-amber-900">
+          <KeyRound className="h-5 w-5 shrink-0 text-amber-600" />
+          <div className="text-[12px] leading-relaxed">
+            <strong>Super Admin Portal:</strong> Enter the master access password to manage workspace admins, approve user requests, and assign system permissions.
+          </div>
+        </div>
+        {error && (
+          <div role="alert" className="rounded-lg border border-[#f0d0ca] bg-[#fff3f0] p-3 text-[12px] text-[#98473d]">
+            {error}
+          </div>
+        )}
+        <label className="block text-[12px] font-semibold text-[#44534f]">
+          Super Admin Email
+          <input
+            type="email"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2c3834] outline-none focus:border-[#28785b]"
+            required
+          />
+        </label>
+        <label className="block text-[12px] font-semibold text-[#44534f]">
+          Master Access Password
+          <input
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="Enter super admin master password"
+            className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2c3834] outline-none focus:border-[#28785b]"
+            required
+            autoFocus
+          />
+        </label>
+        <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-3">
+          <Btn kind="outline" onClick={() => setSuperAdminModalOpen(false)}>Cancel</Btn>
+          <Btn type="submit" disabled={busy} className="bg-amber-700 hover:bg-amber-800 text-white">
+            <LockKeyhole size={14} /> {busy ? 'Verifying…' : 'Unlock Super Admin'}
+          </Btn>
+        </div>
+      </form>
+    </Dialog>
+  );
+}
+
+function UnauthorizedGate({ member }: { member: AnyRecord }) {
+  const { refresh, signOut, requestAccess } = useAuth();
+  const [customMsg, setCustomMsg] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState<Notice>(null);
+  const [checking, setChecking] = useState(false);
+
+  const handleSend = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!customMsg.trim()) return;
+    setSubmitting(true);
+    setFeedback(null);
+    try {
+      await requestAccess(customMsg.trim());
+      setFeedback({
+        tone: 'good',
+        text: 'Your custom message was sent to the Super Admin! You will gain dashboard access as soon as your account is approved.',
+      });
+      setCustomMsg('');
+      await refresh();
+    } catch (err: any) {
+      setFeedback({ tone: 'bad', text: err?.message || 'Could not send message. Please try again.' });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const handleCheckStatus = async () => {
+    setChecking(true);
+    await refresh();
+    setChecking(false);
+  };
+
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-[radial-gradient(ellipse_at_top,#e6f3eb,transparent_65%),#f6f8f7] px-4 py-12">
+      <div className="w-[520px] max-w-full rounded-2xl border border-[#dfe7e2] bg-white p-7 shadow-xl">
+        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-2xl bg-[#fff2ec] text-[#d95a32]">
+          <ShieldAlert size={26} />
+        </div>
+        <div className="inline-flex items-center gap-1.5 rounded-full bg-[#fff2ec] px-3 py-1 text-[11px] font-bold uppercase tracking-wider text-[#d95a32]">
+          Authorization Required
+        </div>
+        <h1 className="mt-3 font-display text-[22px] font-extrabold tracking-tight text-[#253530]">
+          To log in to this platform, notify Super Admin
+        </h1>
+        <p className="mt-2 text-[13px] leading-relaxed text-[#687672]">
+          Self-creation of dashboards is restricted on SpeedMatch CRM. Only users assigned by the Super Admin (as Admin) or by an Admin (as Employee) can access workspace features.
+        </p>
+
+        <div className="mt-4 rounded-xl border border-[#e4ebe7] bg-[#f8faf9] p-3.5 text-[12px] text-[#4d5d58]">
+          <div className="flex items-center justify-between">
+            <span className="font-semibold text-[#273733]">Signed-in Account:</span>
+            <span className="font-mono text-[11px] text-[#697873]">{member?.email}</span>
+          </div>
+          <div className="mt-1 flex items-center justify-between">
+            <span className="text-[#697873]">Access Status:</span>
+            <Badge tone="amber">Pending Approval</Badge>
+          </div>
+        </div>
+
+        {feedback && (
+          <div className={`mt-4 rounded-lg border px-3.5 py-2.5 text-[12px] ${feedback.tone === 'good' ? 'border-[#cae6d5] bg-[#edf8f1] text-[#28684b]' : 'border-[#f0d0ca] bg-[#fff3f0] text-[#98473d]'}`}>
+            {feedback.text}
+          </div>
+        )}
+
+        {member?.requestMessage ? (
+          <div className="mt-4 rounded-xl border border-[#d6e7dc] bg-[#f2f8f4] p-4 text-[12px] text-[#2c5841]">
+            <p className="font-bold text-[#1f4a33]">Your message to the Super Admin:</p>
+            <p className="mt-1 italic">“{member.requestMessage}”</p>
+            <p className="mt-2 text-[11px] text-[#48745c]">
+              The Super Admin can see this message in their panel and assign your permissions.
+            </p>
+          </div>
+        ) : null}
+
+        <form onSubmit={handleSend} className="mt-5 space-y-3">
+          <label className="block text-[12px] font-bold text-[#32433e]">
+            {member?.requestMessage ? 'Send an updated message to Super Admin' : 'Send a custom message to Super Admin'}
+            <textarea
+              required
+              rows={3}
+              value={customMsg}
+              onChange={e => setCustomMsg(e.target.value)}
+              placeholder="E.g., Hi Super Admin, this is Alex. Please approve my access for the workspace."
+              className="mt-1.5 w-full resize-y rounded-xl border border-[#d8e3dd] bg-[#fcfdfc] p-3 text-[13px] text-[#2e3e39] outline-none focus:border-[#28785b] focus:ring-2 focus:ring-[#28785b]/10"
+            />
+          </label>
+          <Btn type="submit" disabled={submitting || !customMsg.trim()} className="w-full">
+            <Send size={14} /> {submitting ? 'Sending…' : 'Send Message to Super Admin'}
+          </Btn>
+        </form>
+
+        <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[#edf1ef] pt-4">
+          <Btn kind="outline" onClick={handleCheckStatus} disabled={checking}>
+            <RotateCw size={13} className={checking ? 'animate-spin' : ''} /> {checking ? 'Checking…' : 'Check Approval Status'}
+          </Btn>
+          <Btn kind="ghost" onClick={signOut} className="text-[#a84d41] hover:bg-[#fff2f0]">
+            <LogOut size={13} /> Sign Out
+          </Btn>
+        </div>
+      </div>
+    </div>
+  );
 }
 type Field = { key: string; label: string; type?: string; options?: string[]; required?: boolean; placeholder?: string };
 type Notice = { tone: 'good' | 'bad' | 'info'; text: string } | null;
@@ -181,10 +445,23 @@ function RecordDialog({ entity, initial, onClose, onSave, busy }: { entity: stri
 }
 
 function Landing() {
-  const { member, isLoaded } = useAuth();
-  if (isLoaded && member) return <Redirect to="/dashboard" />;
+  const { member, isLoaded, setSuperAdminModalOpen } = useAuth();
+  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
   return <main className="min-h-[100dvh] overflow-hidden bg-[#f8faf8] text-[#24332f]">
-    <nav className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-6"><Logo /><div className="flex items-center gap-3"><Link href="/sign-in" data-testid="link-sign-in" className="rounded-lg px-4 py-2 text-[13px] font-semibold text-[#53635e] hover:bg-[#edf2ef]">Sign in</Link><Link href="/sign-up" data-testid="link-request-access" className="rounded-lg bg-[#28785b] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm hover:bg-[#21664d]">Request access <ArrowRight size={14} className="ml-1 inline" /></Link></div></nav>
+    <nav className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-6">
+      <Logo />
+      <div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setSuperAdminModalOpen(true)}
+          className="inline-flex items-center gap-1.5 rounded-lg border border-amber-300/90 bg-amber-50 px-3 py-2 text-[12px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+        >
+          <KeyRound size={13} className="text-amber-700" /> Super Admin
+        </button>
+        <Link href="/sign-in" data-testid="link-sign-in" className="rounded-lg px-4 py-2 text-[13px] font-semibold text-[#53635e] hover:bg-[#edf2ef]">Sign in</Link>
+        <Link href="/sign-up" data-testid="link-request-access" className="rounded-lg bg-[#28785b] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm hover:bg-[#21664d]">Request access <ArrowRight size={14} className="ml-1 inline" /></Link>
+      </div>
+    </nav>
     <section className="relative mx-auto grid max-w-[1240px] items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.08fr_.92fr] lg:pb-28 lg:pt-24">
       <div className="absolute -right-32 top-10 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(183,219,197,.26),transparent_68%)]" />
       <div className="relative z-10 fade-in"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8e7dc] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#327454]"><span className="h-1.5 w-1.5 rounded-full bg-[#63a981]" /> A clearer way to build relationships</div><h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">Good connections<br />move startups <span className="text-[#34835e]">forward.</span></h1><p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.</p><div className="mt-8 flex flex-wrap items-center gap-3"><Link href="/sign-up" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-5 py-3 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.16)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">Get started <ArrowRight size={16} /></Link><span className="text-[12px] text-[#87928e]">Invited by your team? Join in minutes.</span></div><div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5"><div className="flex -space-x-2"><Avatar name="Maya Chen" size="sm" /><Avatar name="Owen Brooks" size="sm" /><Avatar name="Lena Ortiz" size="sm" /></div><p className="text-[12px] text-[#74817d]"><strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.</p></div></div>
@@ -212,23 +489,94 @@ function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     catch (err) { setError(err instanceof Error ? err.message : 'Something went wrong.'); }
     finally { setBusy(false); }
   }
-  return <div className="flex min-h-[100dvh] items-center justify-center bg-[radial-gradient(ellipse_at_top,#e5f1e8,transparent_62%),#f5f8f6] px-4 py-10">
-    <div className="absolute left-7 top-7"><Link href="/" aria-label="SpeedMatch home"><Logo /></Link></div>
-    <form onSubmit={submit} className="w-[440px] max-w-full rounded-2xl bg-white p-8 shadow-xl">
-      <h1 className="font-display text-[22px] font-bold text-[#26343a]">{up ? 'Create workspace account' : 'Welcome back'}</h1>
-      <p className="mt-1 text-[13px] text-[#68777b]">{up ? 'Enter your details and admin initiation code to register.' : 'Sign in to pick up where your team left off.'}</p>
-      {error && <div role="alert" className="mt-4 rounded-lg border border-[#f0d0ca] bg-[#fff3f0] px-3.5 py-2.5 text-[13px] text-[#98473d]">{error}</div>}
-      {up && <label className="mt-5 block text-[13px] font-medium text-[#26343a]">Full name<input data-testid="input-name" required value={name} onChange={e => setName(e.target.value)} className={input} autoComplete="name" /></label>}
-      <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Email<input data-testid="input-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className={input} autoComplete="email" /></label>
-      <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Password<input data-testid="input-password" type="password" required minLength={up ? 8 : undefined} value={password} onChange={e => setPassword(e.target.value)} className={input} autoComplete={up ? 'new-password' : 'current-password'} />{up && <span className="mt-1 block text-[11px] font-normal text-[#68777b]">At least 8 characters.</span>}</label>
-      {up && <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Admin Initiation Code<input data-testid="input-initiation-code" type="text" required placeholder="e.g. SPEEDMATCH2026" value={initiationCode} onChange={e => setInitiationCode(e.target.value)} className={input} /><span className="mt-1 block text-[11px] font-normal text-[#68777b]">Registration requires the initiation code provided by your workspace admin.</span></label>}
-      <button data-testid="button-submit-auth" type="submit" disabled={busy} className="mt-6 w-full rounded-lg bg-[#28785b] px-4 py-2.5 text-[14px] font-semibold text-white hover:bg-[#21674d] disabled:opacity-60">{busy ? 'Please wait…' : up ? 'Create account' : 'Sign in'}</button>
-      <p className="mt-5 text-center text-[13px] text-[#68777b]">{up ? 'Already have an account? ' : 'New here? '}<Link href={up ? '/sign-in' : '/sign-up'} className="font-semibold text-[#28785b]">{up ? 'Sign in' : 'Request access'}</Link></p>
-    </form>
+  return <div className="w-[440px] max-w-full rounded-2xl bg-white p-8 shadow-xl">
+    <h1 className="font-display text-[22px] font-bold text-[#26343a]">{up ? 'Create workspace account' : 'Welcome back'}</h1>
+    <p className="mt-1 text-[13px] text-[#68777b]">{up ? 'Enter your details and admin initiation code to register.' : 'Sign in to pick up where your team left off.'}</p>
+    {error && <div role="alert" className="mt-4 rounded-lg border border-[#f0d0ca] bg-[#fff3f0] px-3.5 py-2.5 text-[13px] text-[#98473d]">{error}</div>}
+    {up && <label className="mt-5 block text-[13px] font-medium text-[#26343a]">Full name<input data-testid="input-name" required value={name} onChange={e => setName(e.target.value)} className={input} autoComplete="name" /></label>}
+    <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Email<input data-testid="input-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className={input} autoComplete="email" /></label>
+    <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Password<input data-testid="input-password" type="password" required minLength={up ? 8 : undefined} value={password} onChange={e => setPassword(e.target.value)} className={input} autoComplete={up ? 'new-password' : 'current-password'} />{up && <span className="mt-1 block text-[11px] font-normal text-[#68777b]">At least 8 characters.</span>}</label>
+    {up && <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Admin Initiation Code<input data-testid="input-initiation-code" type="text" required placeholder="e.g. SPEEDMATCH2026" value={initiationCode} onChange={e => setInitiationCode(e.target.value)} className={input} /><span className="mt-1 block text-[11px] font-normal text-[#68777b]">Registration requires the initiation code provided by your workspace admin.</span></label>}
+    <button data-testid="button-submit-auth" type="submit" disabled={busy} className="mt-6 w-full rounded-lg bg-[#28785b] px-4 py-2.5 text-[14px] font-semibold text-white hover:bg-[#21674d] disabled:opacity-60">{busy ? 'Please wait…' : up ? 'Create account' : 'Sign in'}</button>
+    <p className="mt-5 text-center text-[13px] text-[#68777b]">{up ? 'Already have an account? ' : 'New here? '}<Link href={up ? '/sign-in' : '/sign-up'} className="font-semibold text-[#28785b]">{up ? 'Sign in' : 'Request access'}</Link></p>
   </div>;
 }
-function SignInPage() { return <AuthForm mode="sign-in" />; }
-function SignUpPage() { return <AuthForm mode="sign-up" />; }
+
+function SignInPage() {
+  const { isLoaded, member, clerkKey, setSuperAdminModalOpen } = useAuth();
+  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
+
+  return (
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top,#e5f1e8,transparent_62%),#f5f8f6] px-4 py-10">
+      <div className="mb-6 flex flex-col items-center gap-2">
+        <Link href="/" aria-label="SpeedMatch home"><Logo /></Link>
+      </div>
+      {clerkKey ? (
+        <div className="flex flex-col items-center">
+          <ClerkSignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+          <div className="mt-5 text-center">
+            <button
+              type="button"
+              onClick={() => setSuperAdminModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+            >
+              <KeyRound size={14} className="text-amber-700" /> Super Admin Password Access
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setSuperAdminModalOpen(true)}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+          >
+            <KeyRound size={14} className="text-amber-700" /> Super Admin Portal Access (Password)
+          </button>
+          <AuthForm mode="sign-in" />
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SignUpPage() {
+  const { isLoaded, member, clerkKey, setSuperAdminModalOpen } = useAuth();
+  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
+
+  return (
+    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top,#e5f1e8,transparent_62%),#f5f8f6] px-4 py-10">
+      <div className="mb-6 flex flex-col items-center gap-2">
+        <Link href="/" aria-label="SpeedMatch home"><Logo /></Link>
+      </div>
+      {clerkKey ? (
+        <div className="flex flex-col items-center">
+          <ClerkSignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
+          <div className="mt-5 text-center">
+            <button
+              type="button"
+              onClick={() => setSuperAdminModalOpen(true)}
+              className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+            >
+              <KeyRound size={14} className="text-amber-700" /> Super Admin Password Access
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex flex-col items-center gap-4">
+          <button
+            type="button"
+            onClick={() => setSuperAdminModalOpen(true)}
+            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
+          >
+            <KeyRound size={14} className="text-amber-700" /> Super Admin Portal Access (Password)
+          </button>
+          <AuthForm mode="sign-up" />
+        </div>
+      )}
+    </div>
+  );
+}
 
 function AppShell({ path, member, children }: { path: string; member: AnyRecord; children: ReactNode }) {
   const [mobileOpen, setMobileOpen] = useState(false);
@@ -424,6 +772,9 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const team: AnyRecord[] = members.data || []; const joins: AnyRecord[] = ((requests.data || []) as AnyRecord[]).map(j => ({ ...j, createdAt: j.joinedAt }));
     const [initiationCodeInput, setInitiationCodeInput] = useState('');
     const [updatingCode, setUpdatingCode] = useState(false);
+    const [assignEmail, setAssignEmail] = useState('');
+    const [assignName, setAssignName] = useState('');
+    const [assigningEmp, setAssigningEmp] = useState(false);
 
     useEffect(() => {
       if (isAdmin) {
@@ -457,7 +808,42 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     };
 
-    return <><PageHeader title="Team" description="Bring your people in and keep workspace access in good order." action={isAdmin ? <Btn onClick={() => document.getElementById('invite-email')?.focus()}><UserPlus size={15} /> Invite teammate</Btn> : null} />{notices}
+    const submitAssignEmployee = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!assignEmail.trim()) return;
+      setAssigningEmp(true);
+      try {
+        const res = await fetch('/api/team/assign-employee', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: assignEmail.trim(), name: assignName.trim() }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Employee "${assignEmail}" saved in database! When they log in via Clerk with this email, their dashboard will open immediately.` });
+          setAssignEmail('');
+          setAssignName('');
+          qc.invalidateQueries({ queryKey: getListMembersQueryKey() });
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          setNotice({ tone: 'bad', text: errData?.error || 'Could not assign employee.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to assign employee.' });
+      } finally {
+        setAssigningEmp(false);
+      }
+    };
+
+    return <><PageHeader title="Team" description="Bring your people in and keep workspace access in good order." action={isAdmin ? <Btn onClick={() => document.getElementById('assign-emp-email')?.focus()}><UserPlus size={15} /> Add teammate</Btn> : null} />{notices}
+      {isAdmin && <Card className="mb-4">
+        <CardTitle title="Assign Employee Access by Email" detail="Write an employee's email address to save it in database. When that employee logs in with Clerk, their dashboard will open immediately." right={<UserCheck size={16} className="text-[#347858]" />} />
+        <form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submitAssignEmployee}>
+          <input id="assign-emp-email" data-testid="input-assign-employee-email" required type="email" placeholder="employee@company.com" value={assignEmail} onChange={e => setAssignEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
+          <input data-testid="input-assign-employee-name" type="text" placeholder="Full name (optional)" value={assignName} onChange={e => setAssignName(e.target.value)} className="min-w-0 sm:w-48 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
+          <Btn type="submit" disabled={assigningEmp || !assignEmail.trim()}><Check size={14} />{assigningEmp ? 'Saving…' : 'Save Employee in Database'}</Btn>
+        </form>
+      </Card>}
       {isAdmin && <Card className="mb-4"><CardTitle title="Workspace Initiation Code" detail="Required for new members to complete registration" right={<LockKeyhole size={15} className="text-[#43815f]" />} /><div className="p-4"><p className="mb-3 text-[12px] text-[#63736e]">New team members must enter this initiation code during registration to join your workspace.</p><div className="flex flex-wrap items-center gap-2"><input data-testid="input-workspace-initiation-code" type="text" value={initiationCodeInput} onChange={e => setInitiationCodeInput(e.target.value)} className="w-64 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] font-mono font-semibold text-[#25342f] outline-none focus:border-[#70a88c]" /><Btn onClick={saveInitiationCode} disabled={updatingCode}><Check size={14} />{updatingCode ? 'Saving…' : 'Save Code'}</Btn><Btn kind="outline" onClick={() => { navigator.clipboard.writeText(initiationCodeInput); setNotice({ tone: 'good', text: 'Initiation code copied to clipboard!' }); }}>Copy Code</Btn></div></div></Card>}
       {isAdmin && <Card className="mb-4"><CardTitle title="Invite a teammate" detail="Add their email here, then ask them to sign up with it. They’ll be approved automatically." right={<Mail size={15} className="text-[#84918b]" />} /><form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={e => { e.preventDefault(); createInvitation.mutate({ data: { email: inviteEmail, role: inviteRole } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); setInviteEmail(''); setFeedback({ tone: 'good', text: `${inviteEmail} is invited. Ask them to sign up with this email address to join automatically.` }); }, onError: () => setFeedback({ tone: 'bad', text: 'Invitation could not be saved. Check the email and try again.' }) }); }}><input id="invite-email" data-testid="input-invite-email" required type="email" placeholder="teammate@company.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" /><select aria-label="Invitation role" data-testid="select-invitation-role" value={inviteRole} onChange={e => setInviteRole(e.target.value as 'member' | 'admin')} className="rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px]"><option value="member">Member</option><option value="admin">Admin</option></select><Btn type="submit" disabled={createInvitation.isPending}><Send size={14} />{createInvitation.isPending ? 'Sending…' : 'Send invitation'}</Btn></form></Card>}
       <Card className="mb-4"><CardTitle title="Team members" detail={`${team.length} approved members`} right={<ShieldCheck size={15} className="text-[#43815f]" />} />{members.isLoading ? <LoadingRows /> : members.isError ? <Empty title="Couldn’t load the team" detail="Refresh to check approved workspace members." button={<Btn kind="outline" onClick={() => members.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : team.length ? <Table headers={['Member', 'Role', 'Status', 'Joined']} min="min-w-[580px]">{team.map(m => <tr key={m.id} data-testid={`member-${m.id}`}><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={m.name} /><div><p className="text-[12px] font-semibold text-[#35433e]">{m.name}</p><p className="text-[10px] text-[#87938e]">{m.email} · Member ID {m.id}</p></div></div></td><td className="px-4 py-3"><Badge tone={m.role === 'admin' || m.role === 'super_admin' || m.role === 'owner' ? 'purple' : 'neutral'}>{m.role}</Badge></td><td className="px-4 py-3"><ToneStatus value={m.status} /></td><td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(m.joinedAt)}</td></tr>)}</Table> : <Empty title="It starts with your team" detail="The first approved member becomes the workspace owner. Invite teammates when you’re ready." />}</Card>
@@ -480,6 +866,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   function SuperAdminPage() {
     const [companiesList, setCompaniesList] = useState<AnyRecord[]>([]);
     const [loadingComps, setLoadingComps] = useState(true);
+    const [pendingRequests, setPendingRequests] = useState<AnyRecord[]>([]);
+    const [loadingPending, setLoadingPending] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
     const [compForm, setCompForm] = useState({
       name: '', adminName: '', adminEmail: '', adminPassword: '', initiationCode: 'SPEEDMATCH2026', industry: 'Software', size: '1-10', website: ''
@@ -488,6 +876,11 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const [resetTarget, setResetTarget] = useState<AnyRecord | null>(null);
     const [passInput, setPassInput] = useState('');
     const [resettingPass, setResettingPass] = useState(false);
+
+    // Direct Admin assignment by email
+    const [assignAdminEmail, setAssignAdminEmail] = useState('');
+    const [assignAdminName, setAssignAdminName] = useState('');
+    const [assigningAdmin, setAssigningAdmin] = useState(false);
 
     const loadCompanies = useCallback(async () => {
       setLoadingComps(true);
@@ -501,7 +894,98 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     }, []);
 
-    useEffect(() => { void loadCompanies(); }, [loadCompanies]);
+    const loadPending = useCallback(async () => {
+      setLoadingPending(true);
+      try {
+        const res = await fetch('/api/superadmin/pending-requests', { credentials: 'include' });
+        if (res.ok) setPendingRequests(await res.json());
+      } catch {
+        // silent fallback
+      } finally {
+        setLoadingPending(false);
+      }
+    }, []);
+
+    useEffect(() => {
+      void loadCompanies();
+      void loadPending();
+    }, [loadCompanies, loadPending]);
+
+    const submitAssignAdmin = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!assignAdminEmail.trim()) return;
+      setAssigningAdmin(true);
+      try {
+        const res = await fetch('/api/superadmin/assign-admin', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email: assignAdminEmail.trim(), name: assignAdminName.trim() }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Admin "${assignAdminEmail}" saved in database! When this user logs in via Clerk with this email, their dashboard will open immediately.` });
+          setAssignAdminEmail('');
+          setAssignAdminName('');
+          void loadCompanies();
+          void loadPending();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setNotice({ tone: 'bad', text: err?.error || 'Could not assign admin.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to assign admin.' });
+      } finally {
+        setAssigningAdmin(false);
+      }
+    };
+
+    const approveUserAsAdmin = async (id: number, email: string) => {
+      try {
+        const res = await fetch(`/api/superadmin/requests/${id}/approve-admin`, {
+          method: 'POST', credentials: 'include'
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `User ${email} approved as Workspace Admin.` });
+          void loadPending();
+          void loadCompanies();
+        } else {
+          setNotice({ tone: 'bad', text: 'Could not approve request.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to approve request.' });
+      }
+    };
+
+    const approveUserAsEmployee = async (id: number, email: string) => {
+      try {
+        const res = await fetch(`/api/superadmin/requests/${id}/approve-employee`, {
+          method: 'POST', credentials: 'include'
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `User ${email} approved as Employee.` });
+          void loadPending();
+        } else {
+          setNotice({ tone: 'bad', text: 'Could not approve request.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to approve request.' });
+      }
+    };
+
+    const rejectUserRequest = async (id: number, email: string) => {
+      if (!confirm(`Decline access request for ${email}?`)) return;
+      try {
+        const res = await fetch(`/api/superadmin/requests/${id}/reject`, {
+          method: 'POST', credentials: 'include'
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Access request declined for ${email}.` });
+          void loadPending();
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Could not decline request.' });
+      }
+    };
 
     const submitCreateCompany = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -585,8 +1069,88 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     };
 
     return <>
-      <PageHeader title="Super Admin Workspace Management" description="Create company workspaces, generate Admin IDs & Passwords, and manage initiation codes." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company & Admin</Btn>} />
+      <PageHeader title="Super Admin Workspace Management" description="Assign Admin accounts by email, review access requests with custom messages, and manage workspaces." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company & Admin</Btn>} />
       {notices}
+
+      {/* Card 1: Assign Admin by Email */}
+      <Card className="mb-5">
+        <CardTitle title="Assign Admin Access by Email" detail="Write an email address to save it in database as Admin. When that admin logs in via Clerk with that email, their dashboard will unlock immediately." right={<ShieldCheck size={16} className="text-[#347858]" />} />
+        <form className="flex flex-col gap-3 p-5 sm:flex-row" onSubmit={submitAssignAdmin}>
+          <input
+            data-testid="input-assign-admin-email"
+            type="email"
+            required
+            placeholder="admin@company.com"
+            value={assignAdminEmail}
+            onChange={e => setAssignAdminEmail(e.target.value)}
+            className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
+          />
+          <input
+            data-testid="input-assign-admin-name"
+            type="text"
+            placeholder="Admin Full Name (optional)"
+            value={assignAdminName}
+            onChange={e => setAssignAdminName(e.target.value)}
+            className="min-w-0 sm:w-56 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
+          />
+          <Btn type="submit" disabled={assigningAdmin || !assignAdminEmail.trim()}>
+            <Check size={14} /> {assigningAdmin ? 'Saving…' : 'Save Admin in Database'}
+          </Btn>
+        </form>
+      </Card>
+
+      {/* Card 2: Pending User Requests with Custom Messages */}
+      <Card className="mb-5">
+        <CardTitle
+          title="Pending User Access Requests"
+          detail="Review sign-ins waiting for Super Admin approval, along with their custom notification message"
+          right={<Badge tone={pendingRequests.length ? 'amber' : 'neutral'}>{pendingRequests.length} pending</Badge>}
+        />
+        {loadingPending ? (
+          <LoadingRows />
+        ) : pendingRequests.length ? (
+          <div className="divide-y divide-[#f0f2f1]">
+            {pendingRequests.map(req => (
+              <div key={req.id} className="p-5 transition hover:bg-[#fafcfb]">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <Avatar name={req.name || req.email} />
+                    <div>
+                      <p className="text-[13px] font-bold text-[#2a3a35]">{req.name || req.email}</p>
+                      <p className="font-mono text-[11px] text-[#71817c]">{req.email} · Requested {dateLabel(req.joinedAt)}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Btn kind="primary" onClick={() => approveUserAsAdmin(req.id, req.email)}>
+                      <ShieldCheck size={14} /> Approve as Admin
+                    </Btn>
+                    <Btn kind="soft" onClick={() => approveUserAsEmployee(req.id, req.email)}>
+                      <UserCheck size={14} /> Approve as Employee
+                    </Btn>
+                    <Btn kind="danger" onClick={() => rejectUserRequest(req.id, req.email)}>
+                      <X size={14} /> Decline
+                    </Btn>
+                  </div>
+                </div>
+                {req.requestMessage ? (
+                  <div className="mt-3 rounded-xl border border-[#dbe6df] bg-[#f7faf8] p-3.5 text-[12px] text-[#2c4e3e]">
+                    <span className="font-bold text-[#1f4a33]">User Custom Message:</span> “{req.requestMessage}”
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[11px] text-[#93a09b] italic">No custom message submitted yet.</p>
+                )}
+              </div>
+            ))}
+          </div>
+        ) : (
+          <Empty
+            title="All access requests processed"
+            detail="When new unassigned users sign in through Clerk, their account will be blocked and their custom message will appear here for your approval."
+          />
+        )}
+      </Card>
+
+      {/* Card 3: Registered Companies & Admins */}
       <Card>
         <CardTitle title="Registered Companies & Workspace Admins" detail={`${companiesList.length} total companies`} right={<Building2 size={16} className="text-[#347858]" />} />
         {loadingComps ? <LoadingRows /> : companiesList.length ? <Table headers={['Company Workspace', 'Admin Details', 'Initiation Code', 'Members', 'Actions']}>
@@ -652,7 +1216,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     case '/super-admin': content = <SuperAdminPage />; break;
     default: content = <NotFound />;
   }
-  if (!approved) return <AppShell path={path} member={member}><Card className="mt-16 mx-auto max-w-lg"><Empty title="Checking workspace access" detail="Your membership is still being confirmed. CRM data remains private until access is approved." button={<Btn kind="outline" onClick={() => window.location.reload()}><RotateCw size={14} /> Check status</Btn>} /></Card></AppShell>;
+  if (!approved && member?.role !== 'super_admin') return <AppShell path={path} member={member}><Card className="mt-16 mx-auto max-w-lg"><Empty title="Checking workspace access" detail="Your membership is still being confirmed. CRM data remains private until access is approved." button={<Btn kind="outline" onClick={() => window.location.reload()}><RotateCw size={14} /> Check status</Btn>} /></Card></AppShell>;
   return <AppShell path={path} member={member}><div className="fade-in">{failed && <NoticeBar notice={{ tone: 'bad', text: 'Some workspace data could not be loaded. Retry the section below.' }} clear={() => qs.forEach((q: any) => q.refetch())} />}{content}</div>{modal && <RecordDialog entity={modal.entity} initial={modal.row} onClose={() => setModal(null)} onSave={data => saveResource(modal.entity, data)} busy={allPending} />}</AppShell>;
 }
 
@@ -660,6 +1224,9 @@ function MemberGate({ path }: { path: string }) {
   const { isLoaded, member } = useAuth();
   if (!isLoaded) return <div className="grid min-h-[100dvh] place-items-center bg-[#f6f8f7]"><div className="flex items-center gap-3 rounded-xl border border-[#e3e9e5] bg-white px-5 py-4 text-[12px] text-[#71807a]"><span className="h-2 w-2 animate-pulse rounded-full bg-[#599570]" /> Preparing your workspace…</div></div>;
   if (!member) return <Redirect to="/sign-in" />;
+  if (member.role !== 'super_admin' && member.status !== 'active') {
+    return <UnauthorizedGate member={member} />;
+  }
   return <Workspace path={path} member={member} />;
 }
 
@@ -679,7 +1246,32 @@ function RouterContent() {
     <Route component={NotFound} />
   </Switch>;
 }
+
+function ClerkWrapper({ children }: { children: ReactNode }) {
+  const { clerkKey } = useAuth();
+  if (clerkKey && clerkKey.startsWith('pk_')) {
+    return (
+      <ClerkProvider publishableKey={clerkKey}>
+        <ClerkSyncBridge />
+        {children}
+      </ClerkProvider>
+    );
+  }
+  return <>{children}</>;
+}
+
 function App() {
-  return <WouterRouter base={basePath}><QueryClientProvider client={client}><AuthProvider><RouterContent /></AuthProvider></QueryClientProvider></WouterRouter>;
+  return (
+    <WouterRouter base={basePath}>
+      <QueryClientProvider client={client}>
+        <AuthProvider>
+          <ClerkWrapper>
+            <RouterContent />
+            <SuperAdminModal />
+          </ClerkWrapper>
+        </AuthProvider>
+      </QueryClientProvider>
+    </WouterRouter>
+  );
 }
 export default App;

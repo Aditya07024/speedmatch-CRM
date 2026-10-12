@@ -480,7 +480,8 @@ export const GetCurrentMemberResponse = zod.object({
   "role": zod.string(),
   "status": zod.string(),
   "joinedAt": zod.coerce.date(),
-  "avatarUrl": zod.string().nullish()
+  "avatarUrl": zod.string().nullish(),
+  "requestMessage": zod.string().nullish()
 })
 
 

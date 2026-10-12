@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { randomUUID } from "node:crypto";
 import { and, desc, eq, sql } from "drizzle-orm";
 import {
   companiesTable,
@@ -234,6 +235,60 @@ router.put(
 
     await addActivity("team", "Initiation code updated", newCode);
     res.json({ initiationCode: newCode });
+  },
+);
+
+// POST /api/team/assign-employee - Workspace Admin assigns an Employee directly
+router.post(
+  "/team/assign-employee",
+  requireAdmin,
+  async (req, res): Promise<void> => {
+    const admin = getRequestMember(res);
+    const email = String(req.body?.email ?? "").trim().toLowerCase();
+    const name = String(req.body?.name ?? "").trim();
+
+    if (!email || !email.includes("@")) {
+      res.status(400).json({ error: "Valid email is required" });
+      return;
+    }
+
+    const [existing] = await db
+      .select()
+      .from(teamMembersTable)
+      .where(sql`lower(${teamMembersTable.email}) = ${email}`)
+      .limit(1);
+
+    if (existing) {
+      const [updated] = await db
+        .update(teamMembersTable)
+        .set({
+          role: "member",
+          status: "active",
+          companyId: admin.companyId ?? existing.companyId,
+          name: name || existing.name,
+        })
+        .where(eq(teamMembersTable.id, existing.id))
+        .returning();
+
+      await addActivity("team", "Assigned employee to workspace", email);
+      res.json({ ok: true, member: memberForResponse(updated) });
+      return;
+    }
+
+    const [created] = await db
+      .insert(teamMembersTable)
+      .values({
+        authId: randomUUID(),
+        email,
+        name: name || email.split("@")[0],
+        role: "member",
+        status: "active",
+        companyId: admin.companyId,
+      })
+      .returning();
+
+    await addActivity("team", "Pre-assigned employee to workspace", email);
+    res.status(201).json({ ok: true, member: memberForResponse(created) });
   },
 );
 

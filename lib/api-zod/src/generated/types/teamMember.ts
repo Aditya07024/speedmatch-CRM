@@ -16,4 +16,6 @@ export interface TeamMember {
   joinedAt: Date;
   /** @nullable */
   avatarUrl?: string | null;
+  /** @nullable */
+  requestMessage?: string | null;
 }

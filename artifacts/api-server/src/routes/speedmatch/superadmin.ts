@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
-import { count, eq, sql } from "drizzle-orm";
+import { count, desc, eq, sql } from "drizzle-orm";
 import {
   companiesTable,
   db,
@@ -210,6 +210,127 @@ router.delete("/superadmin/companies/:id", async (req, res): Promise<void> => {
   await addActivity("company", "Company workspace deleted", deletedCompany.name);
 
   res.status(204).end();
+});
+
+// GET /api/superadmin/pending-requests - List all users pending approval with custom messages
+router.get("/superadmin/pending-requests", async (_req, res): Promise<void> => {
+  const requests = await db
+    .select({
+      id: teamMembersTable.id,
+      name: teamMembersTable.name,
+      email: teamMembersTable.email,
+      role: teamMembersTable.role,
+      status: teamMembersTable.status,
+      requestMessage: teamMembersTable.requestMessage,
+      joinedAt: teamMembersTable.joinedAt,
+      avatarUrl: teamMembersTable.avatarUrl,
+    })
+    .from(teamMembersTable)
+    .where(eq(teamMembersTable.status, "pending"))
+    .orderBy(desc(teamMembersTable.joinedAt));
+
+  res.json(requests.map(r => ({ ...r, joinedAt: asIso(r.joinedAt) })));
+});
+
+// POST /api/superadmin/requests/:id/approve-admin - Approve pending request as Admin
+router.post("/superadmin/requests/:id/approve-admin", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [updated] = await db
+    .update(teamMembersTable)
+    .set({ role: "admin", status: "active" })
+    .where(eq(teamMembersTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Request not found" });
+    return;
+  }
+  await addActivity("team", "Approved user as Workspace Admin", updated.email);
+  res.json({ ok: true, member: updated });
+});
+
+// POST /api/superadmin/requests/:id/approve-employee - Approve pending request as Employee
+router.post("/superadmin/requests/:id/approve-employee", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [updated] = await db
+    .update(teamMembersTable)
+    .set({ role: "member", status: "active" })
+    .where(eq(teamMembersTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Request not found" });
+    return;
+  }
+  await addActivity("team", "Approved user as Employee", updated.email);
+  res.json({ ok: true, member: updated });
+});
+
+// POST /api/superadmin/requests/:id/reject - Reject pending request
+router.post("/superadmin/requests/:id/reject", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [updated] = await db
+    .update(teamMembersTable)
+    .set({ status: "rejected" })
+    .where(eq(teamMembersTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Request not found" });
+    return;
+  }
+  await addActivity("team", "Rejected user access", updated.email);
+  res.json({ ok: true, member: updated });
+});
+
+// POST /api/superadmin/assign-admin - Directly assign any email as an Admin
+router.post("/superadmin/assign-admin", async (req, res): Promise<void> => {
+  const email = String(req.body?.email ?? "").trim().toLowerCase();
+  const name = String(req.body?.name ?? "").trim();
+  const companyId = req.body?.companyId ? Number(req.body.companyId) : null;
+
+  if (!email || !email.includes("@")) {
+    res.status(400).json({ error: "Valid email is required" });
+    return;
+  }
+
+  const [existing] = await db
+    .select()
+    .from(teamMembersTable)
+    .where(sql`lower(${teamMembersTable.email}) = ${email}`)
+    .limit(1);
+
+  if (existing) {
+    const [updated] = await db
+      .update(teamMembersTable)
+      .set({
+        role: "admin",
+        status: "active",
+        companyId: companyId ?? existing.companyId,
+        name: name || existing.name,
+      })
+      .where(eq(teamMembersTable.id, existing.id))
+      .returning();
+
+    await addActivity("team", "Assigned user as Admin", email);
+    res.json({ ok: true, member: updated });
+    return;
+  }
+
+  const [created] = await db
+    .insert(teamMembersTable)
+    .values({
+      authId: randomUUID(),
+      email,
+      name: name || email.split("@")[0],
+      role: "admin",
+      status: "active",
+      companyId: companyId,
+    })
+    .returning();
+
+  await addActivity("team", "Pre-assigned email as Admin", email);
+  res.status(201).json({ ok: true, member: created });
 });
 
 export default router;
