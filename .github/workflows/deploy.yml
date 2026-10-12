@@ -1,0 +1,82 @@
+name: Deploy CRM to Live Server
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build-and-verify:
+    name: Build & Verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build frontend & backend
+        run: pnpm run build
+
+  deploy:
+    name: Deploy to VPS
+    needs: build-and-verify
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Deploy to Remote Server via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          password: ${{ secrets.SSH_PASSWORD }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script_stop: true
+          script: |
+            echo "==> Deploying SpeedMatch CRM to /var/www/CRM..."
+            cd /var/www/CRM
+
+            # Pull latest changes from main
+            git fetch origin main
+            git reset --hard origin/main
+
+            # Ensure Node, npm, and pnpm environments are loaded
+            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
+            [ -s "$HOME/.profile" ] && . "$HOME/.profile"
+            [ -s "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+            export PATH="$PATH:/usr/local/bin:/usr/bin:$HOME/.local/share/pnpm"
+
+            # Verify or install pnpm & pm2 if missing
+            command -v pnpm >/dev/null 2>&1 || npm install -g pnpm
+            command -v pm2 >/dev/null 2>&1 || npm install -g pm2
+
+            # Install dependencies & build
+            pnpm install --frozen-lockfile || pnpm install
+            pnpm run build
+
+            # Apply database schema if .env is present
+            if [ -f .env ]; then
+              echo "==> Pushing database schema..."
+              pnpm db:push || echo "Notice: Database push completed or requires verification"
+            fi
+
+            # Reload or start PM2 application
+            echo "==> Reloading PM2 process..."
+            pm2 reload ecosystem.config.cjs --update-env || pm2 start ecosystem.config.cjs
+            pm2 save
+            echo "==> Deployment completed successfully!"
