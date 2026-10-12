@@ -79,7 +79,12 @@ function AuthProvider({ children }: { children: ReactNode }) {
   const [member, setMember] = useState<AnyRecord | null>(null);
   const [superAdminModalOpen, setSuperAdminModalOpen] = useState(false);
   const [clerkKey, setClerkKey] = useState<string>(() => {
-    const envKey = (import.meta.env.VITE_CLERK_PUBLISHABLE_KEY || '').trim();
+    const envKey = (
+      import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ||
+      import.meta.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
+      import.meta.env.CLERK_PUBLISHABLE_KEY ||
+      ''
+    ).trim();
     return envKey.startsWith('pk_') && !envKey.includes('your_publishable_key') ? envKey : '';
   });
 
@@ -458,13 +463,14 @@ function Landing() {
         >
           <KeyRound size={13} className="text-amber-700" /> Super Admin
         </button>
-        <Link href="/sign-in" data-testid="link-sign-in" className="rounded-lg px-4 py-2 text-[13px] font-semibold text-[#53635e] hover:bg-[#edf2ef]">Sign in</Link>
-        <Link href="/sign-up" data-testid="link-request-access" className="rounded-lg bg-[#28785b] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm hover:bg-[#21664d]">Request access <ArrowRight size={14} className="ml-1 inline" /></Link>
+        <Link href="/sign-in" data-testid="link-sign-in" className="rounded-lg bg-[#28785b] px-5 py-2.5 text-[13px] font-semibold text-white shadow-sm hover:bg-[#21664d]">
+          Sign in <ArrowRight size={14} className="ml-1 inline" />
+        </Link>
       </div>
     </nav>
     <section className="relative mx-auto grid max-w-[1240px] items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.08fr_.92fr] lg:pb-28 lg:pt-24">
       <div className="absolute -right-32 top-10 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(183,219,197,.26),transparent_68%)]" />
-      <div className="relative z-10 fade-in"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8e7dc] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#327454]"><span className="h-1.5 w-1.5 rounded-full bg-[#63a981]" /> A clearer way to build relationships</div><h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">Good connections<br />move startups <span className="text-[#34835e]">forward.</span></h1><p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.</p><div className="mt-8 flex flex-wrap items-center gap-3"><Link href="/sign-up" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-5 py-3 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.16)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">Get started <ArrowRight size={16} /></Link><span className="text-[12px] text-[#87928e]">Invited by your team? Join in minutes.</span></div><div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5"><div className="flex -space-x-2"><Avatar name="Maya Chen" size="sm" /><Avatar name="Owen Brooks" size="sm" /><Avatar name="Lena Ortiz" size="sm" /></div><p className="text-[12px] text-[#74817d]"><strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.</p></div></div>
+      <div className="relative z-10 fade-in"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8e7dc] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#327454]"><span className="h-1.5 w-1.5 rounded-full bg-[#63a981]" /> A clearer way to build relationships</div><h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">Good connections<br />move startups <span className="text-[#34835e]">forward.</span></h1><p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.</p><div className="mt-8 flex flex-wrap items-center gap-3"><Link href="/sign-in" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-5 py-3 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.16)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">Sign in to Workspace <ArrowRight size={16} /></Link></div><div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5"><div className="flex -space-x-2"><Avatar name="Maya Chen" size="sm" /><Avatar name="Owen Brooks" size="sm" /><Avatar name="Lena Ortiz" size="sm" /></div><p className="text-[12px] text-[#74817d]"><strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.</p></div></div>
       <div className="relative z-10 fade-in lg:translate-y-3"><div className="absolute -inset-5 rounded-[28px] bg-[#e5efe8] blur-2xl" /><div className="relative rounded-[20px] border border-[#e3eae5] bg-white p-4 shadow-[0_24px_70px_rgba(40,70,54,.12)] sm:p-5"><div className="mb-4 flex items-center justify-between"><div className="flex gap-1.5"><i className="h-2 w-2 rounded-full bg-[#e6c17b]" /><i className="h-2 w-2 rounded-full bg-[#91c4a2]" /><i className="h-2 w-2 rounded-full bg-[#d7e0db]" /></div><span className="text-[10px] font-semibold tracking-wide text-[#85928d]">MONDAY, MAY 19</span><Ellipsis size={16} className="text-[#a1aaa5]" /></div><div className="rounded-xl bg-[#f7faf8] p-4"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-[#83918b]">Active relationships</p><p className="mt-1 font-display text-[30px] font-extrabold tracking-[-.055em]">184 partners</p></div><span className="rounded-md bg-[#e8f4ec] px-2 py-1 text-[10px] font-bold text-[#347653]">+18.4%</span></div><div className="mt-4 flex h-[90px] items-end gap-2 border-b border-[#e6ece8] pb-1">{[30, 45, 36, 57, 48, 67, 59, 83, 72, 92, 76, 100, 87, 94].map((v, i) => <span key={i} className="flex-1 rounded-t-sm bg-[#9ac7a8]" style={{ height: `${v}%`, opacity: .45 + (i / 30) }} />)}</div><div className="mt-2 flex justify-between text-[9px] text-[#98a29d]"><span>Mar 01</span><span>Mar 15</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span></div></div><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Next up</span><CalendarDays size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><span className="h-7 w-1 rounded-full bg-[#d7a95b]" /><div><p className="text-[11px] font-bold">Pricing follow-up</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery at Northstar · 2:30 PM</p></div></div></div><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Recent activity</span><ActivityIcon size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><Avatar name="Avery Mason" size="sm" /><div><p className="text-[11px] font-bold">New conversation</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery · 12 minutes ago</p></div></div></div></div><div className="mt-4 flex items-center justify-between rounded-xl bg-[#263b34] px-4 py-3 text-white"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10"><Users size={14} /></span><span className="text-[11px] font-semibold">Good teams stay in sync.</span></div><span className="text-[10px] text-[#b6d1c1]">Your team, one view</span></div></div></div>
     </section>
     <section className="border-y border-[#e6ebe7] bg-white/65"><div className="mx-auto grid max-w-[1240px] gap-8 px-6 py-9 md:grid-cols-3"><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#eaf4ee] text-[#347b57]"><ContactRound size={17} /></span><div><p className="text-[13px] font-bold">Relationships, remembered</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Know the person, company, and context behind every opportunity.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f6f0e4] text-[#987a3e]"><Target size={17} /></span><div><p className="text-[13px] font-bold">Momentum, made visible</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">A focused pipeline and timely follow-ups without the CRM overhead.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#edf0f7] text-[#687a9b]"><MessageCircle size={17} /></span><div><p className="text-[13px] font-bold">Your community, together</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Share a win, find an answer, and keep conversations close to work.</p></div></div></div></section>
@@ -490,15 +496,12 @@ function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
     finally { setBusy(false); }
   }
   return <div className="w-[440px] max-w-full rounded-2xl bg-white p-8 shadow-xl">
-    <h1 className="font-display text-[22px] font-bold text-[#26343a]">{up ? 'Create workspace account' : 'Welcome back'}</h1>
-    <p className="mt-1 text-[13px] text-[#68777b]">{up ? 'Enter your details and admin initiation code to register.' : 'Sign in to pick up where your team left off.'}</p>
+    <h1 className="font-display text-[22px] font-bold text-[#26343a]">Sign in to Workspace</h1>
+    <p className="mt-1 text-[13px] text-[#68777b]">Enter your email and password to access your team dashboard.</p>
     {error && <div role="alert" className="mt-4 rounded-lg border border-[#f0d0ca] bg-[#fff3f0] px-3.5 py-2.5 text-[13px] text-[#98473d]">{error}</div>}
-    {up && <label className="mt-5 block text-[13px] font-medium text-[#26343a]">Full name<input data-testid="input-name" required value={name} onChange={e => setName(e.target.value)} className={input} autoComplete="name" /></label>}
     <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Email<input data-testid="input-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className={input} autoComplete="email" /></label>
-    <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Password<input data-testid="input-password" type="password" required minLength={up ? 8 : undefined} value={password} onChange={e => setPassword(e.target.value)} className={input} autoComplete={up ? 'new-password' : 'current-password'} />{up && <span className="mt-1 block text-[11px] font-normal text-[#68777b]">At least 8 characters.</span>}</label>
-    {up && <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Admin Initiation Code<input data-testid="input-initiation-code" type="text" required placeholder="e.g. SPEEDMATCH2026" value={initiationCode} onChange={e => setInitiationCode(e.target.value)} className={input} /><span className="mt-1 block text-[11px] font-normal text-[#68777b]">Registration requires the initiation code provided by your workspace admin.</span></label>}
-    <button data-testid="button-submit-auth" type="submit" disabled={busy} className="mt-6 w-full rounded-lg bg-[#28785b] px-4 py-2.5 text-[14px] font-semibold text-white hover:bg-[#21674d] disabled:opacity-60">{busy ? 'Please wait…' : up ? 'Create account' : 'Sign in'}</button>
-    <p className="mt-5 text-center text-[13px] text-[#68777b]">{up ? 'Already have an account? ' : 'New here? '}<Link href={up ? '/sign-in' : '/sign-up'} className="font-semibold text-[#28785b]">{up ? 'Sign in' : 'Request access'}</Link></p>
+    <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Password<input data-testid="input-password" type="password" required value={password} onChange={e => setPassword(e.target.value)} className={input} autoComplete="current-password" /></label>
+    <button data-testid="button-submit-auth" type="submit" disabled={busy} className="mt-6 w-full rounded-lg bg-[#28785b] px-4 py-2.5 text-[14px] font-semibold text-white hover:bg-[#21674d] disabled:opacity-60">{busy ? 'Please wait…' : 'Sign in'}</button>
   </div>;
 }
 
@@ -513,7 +516,7 @@ function SignInPage() {
       </div>
       {clerkKey ? (
         <div className="flex flex-col items-center">
-          <ClerkSignIn routing="path" path={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`} />
+          <ClerkSignIn routing="path" path={`${basePath}/sign-in`} />
           <div className="mt-5 text-center">
             <button
               type="button"
@@ -541,41 +544,7 @@ function SignInPage() {
 }
 
 function SignUpPage() {
-  const { isLoaded, member, clerkKey, setSuperAdminModalOpen } = useAuth();
-  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
-
-  return (
-    <div className="flex min-h-[100dvh] flex-col items-center justify-center bg-[radial-gradient(ellipse_at_top,#e5f1e8,transparent_62%),#f5f8f6] px-4 py-10">
-      <div className="mb-6 flex flex-col items-center gap-2">
-        <Link href="/" aria-label="SpeedMatch home"><Logo /></Link>
-      </div>
-      {clerkKey ? (
-        <div className="flex flex-col items-center">
-          <ClerkSignUp routing="path" path={`${basePath}/sign-up`} signInUrl={`${basePath}/sign-in`} />
-          <div className="mt-5 text-center">
-            <button
-              type="button"
-              onClick={() => setSuperAdminModalOpen(true)}
-              className="inline-flex items-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
-            >
-              <KeyRound size={14} className="text-amber-700" /> Super Admin Password Access
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center gap-4">
-          <button
-            type="button"
-            onClick={() => setSuperAdminModalOpen(true)}
-            className="w-full inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300 bg-amber-50 px-4 py-2.5 text-[13px] font-bold text-amber-900 shadow-sm transition hover:bg-amber-100"
-          >
-            <KeyRound size={14} className="text-amber-700" /> Super Admin Portal Access (Password)
-          </button>
-          <AuthForm mode="sign-up" />
-        </div>
-      )}
-    </div>
-  );
+  return <Redirect to="/sign-in" />;
 }
 
 function AppShell({ path, member, children }: { path: string; member: AnyRecord; children: ReactNode }) {
@@ -587,8 +556,14 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
   const name = member?.name || member?.email || 'Team member';
   const isSuperAdmin = member?.role === 'super_admin';
   const effectiveNavGroups = isSuperAdmin ? [
-    { label: 'Super Admin', items: [{ label: 'Super Admin', href: '/super-admin', icon: ShieldCheck }] },
-    ...navGroups,
+    {
+      label: 'Super Admin',
+      items: [
+        { label: 'Workspaces & Access', href: '/super-admin', icon: ShieldCheck },
+        { label: 'Companies', href: '/companies', icon: Building2 },
+        { label: 'Community', href: '/community', icon: Compass },
+      ],
+    },
   ] : navGroups;
 
   useEffect(() => {
@@ -608,11 +583,11 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
       <div className="flex h-[68px] items-center border-b border-white/10 px-5"><Logo light /></div>
       <div className="mx-3 mt-5 flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[.055] px-3 py-2.5"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#bddac6] text-[#28513c]"><BriefcaseBusiness size={14} /></span><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-bold text-white">{isSuperAdmin ? 'Super Admin Mode' : 'My workspace'}</p><p className="truncate text-[10px] text-[#a8b9af]">{isSuperAdmin ? 'Platform Management' : 'Startup team'}</p></div><ChevronDown size={13} className="text-[#a8b9af]" /></div>
       <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3">{effectiveNavGroups.map(group => <div key={group.label}><div className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[.17em] text-[#82968a]">{group.label}</div><div className="space-y-0.5">{group.items.map(({ label, href, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`nav-${label.toLowerCase()}`} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium transition ${path === href ? 'bg-[#e8f2eb] text-[#263d33] shadow-sm' : 'text-[#c0cec5] hover:bg-white/[.075] hover:text-white'}`}><Icon size={16} strokeWidth={1.8} /><span className="flex-1">{label}</span>{label === 'Inbox' && <span className="h-1.5 w-1.5 rounded-full bg-[#84c99b]" />}</Link>)}</div></div>)}</nav>
-      <div className="m-3 rounded-xl border border-white/10 bg-[#30443d] p-3.5"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#405c4e] text-[#b8d8c1]"><Sparkles size={14} /></span><span className="text-[11px] font-bold text-white">Built for momentum</span></div><p className="mt-2 text-[10px] leading-4 text-[#b0c1b7]">Keep the important conversations moving.</p></div>
+      <div className="m-3 rounded-xl border border-white/10 bg-[#30443d] p-3.5"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#405c4e] text-[#b8d8c1]"><Sparkles size={14} /></span><span className="text-[11px] font-bold text-white">{isSuperAdmin ? 'Master Access' : 'Built for momentum'}</span></div><p className="mt-2 text-[10px] leading-4 text-[#b0c1b7]">{isSuperAdmin ? 'Super admin access control & workspace management.' : 'Keep the important conversations moving.'}</p></div>
       <div className="border-t border-white/10 p-3"><button data-testid="button-account-menu" onClick={() => { void signOut(); }} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-white/[.06]"><Avatar name={name} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-white">{name}</span><span className="block truncate text-[10px] capitalize text-[#9eb0a5]">{member?.role || 'Member'} · Sign out</span></span><LogOut size={14} className="text-[#aabbb0]" /></button></div>
     </aside>
     <div className="min-h-[100dvh] md:pl-[236px]">
-      <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>Workspace</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{pageNames[path] || (path === '/super-admin' ? 'Super Admin' : 'Dashboard')}</span></div><div className="relative hidden lg:block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#919d97]" /><input ref={searchInputRef} aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div></div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> Synced</span><div className="relative"><button aria-label="Notifications" data-testid="status-notifications" onClick={() => setNotificationsOpen(v => !v)} className="relative rounded-lg p-2 text-[#76837e] transition hover:bg-[#edf2ef] hover:text-[#28785b]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#38855e]" /></button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e1e8e4] bg-white p-3 shadow-xl"><div className="mb-2 flex items-center justify-between border-b border-[#edf0ee] pb-2"><span className="text-[12px] font-bold text-[#32423c]">Notifications</span><span className="text-[10px] text-[#71817b]">Workspace live</span></div><div className="space-y-2 text-[11px]"><div className="rounded-lg bg-[#f6f9f7] p-2 text-[#465650]"><p className="font-semibold text-[#28785b]">Active Workspace Sync</p><p className="text-[10px] text-[#7b8984]">All contacts, deals, and tasks are synchronized.</p></div><Link href="/tasks" onClick={() => setNotificationsOpen(false)} className="block rounded-lg p-2 hover:bg-[#f3f7f5] text-[#34443e]"><p className="font-semibold">Review your follow-ups</p><p className="text-[10px] text-[#818f8a]">Check today’s task queue to maintain momentum.</p></Link></div></div>}</div><span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
+      <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>{isSuperAdmin ? 'Super Admin' : 'Workspace'}</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{path === '/super-admin' ? 'Workspaces & Access' : (pageNames[path] || (isSuperAdmin ? 'Super Admin' : 'Dashboard'))}</span></div>{!isSuperAdmin && <div className="relative hidden lg:block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#919d97]" /><input ref={searchInputRef} aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div>}</div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> {isSuperAdmin ? 'Super Admin Active' : 'Synced'}</span>{!isSuperAdmin && <div className="relative"><button aria-label="Notifications" data-testid="status-notifications" onClick={() => setNotificationsOpen(v => !v)} className="relative rounded-lg p-2 text-[#76837e] transition hover:bg-[#edf2ef] hover:text-[#28785b]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#38855e]" /></button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e1e8e4] bg-white p-3 shadow-xl"><div className="mb-2 flex items-center justify-between border-b border-[#edf0ee] pb-2"><span className="text-[12px] font-bold text-[#32423c]">Notifications</span><span className="text-[10px] text-[#71817b]">Workspace live</span></div><div className="space-y-2 text-[11px]"><div className="rounded-lg bg-[#f6f9f7] p-2 text-[#465650]"><p className="font-semibold text-[#28785b]">Active Workspace Sync</p><p className="text-[10px] text-[#7b8984]">All contacts, deals, and tasks are synchronized.</p></div><Link href="/tasks" onClick={() => setNotificationsOpen(false)} className="block rounded-lg p-2 hover:bg-[#f3f7f5] text-[#34443e]"><p className="font-semibold">Review your follow-ups</p><p className="text-[10px] text-[#818f8a]">Check today’s task queue to maintain momentum.</p></Link></div></div>}</div>}<span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
       <main className="mx-auto max-w-[1480px] px-4 py-6 md:px-7 md:py-7">{children}</main>
     </div>
   </div>;
@@ -755,7 +730,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <Card>
           <CardTitle title="Pipeline by stage" detail="Opportunities by current stage" right={<Link href="/deals" className="text-[11px] font-semibold text-[#43815f]">View deals <ArrowRight size={12} className="inline" /></Link>} />
-          {d?.stageBreakdown?.length ? <div className="space-y-4 p-5">{d.stageBreakdown.map((s: AnyRecord, i: number) => <div key={s.stage}><div className="mb-1.5 flex items-center justify-between"><span className="text-[11px] font-semibold text-[#53615c]">{s.stage}</span><span className="font-mono text-[10px] text-[#89948f]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#eff2f0]"><div className="h-full rounded-full bg-[#599570]" style={{ width: `${Math.max(4, Math.min(100, s.count / Math.max(...d.stageBreakdown.map((x: AnyRecord) => x.count), 1) * 100))}%`, opacity: 1 - i * .09 }} /></div></div>)}</div> : <Empty title="No active pipeline" detail="Create an opportunity to see momentum by stage." button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>} />}
+          {d?.stageBreakdown?.length ? <div className="space-y-4 p-5">{d.stageBreakdown.map((s: AnyRecord, i: number) => <div key={s.stage}><div className="mb-1.5 flex items-center justify-between"><span className="text-[11px] font-semibold text-[#53615c]">{s.stage}</span><span className="font-mono text-[10px] text-[#89948f]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#eff2f0]"><div className="h-full rounded-full bg-[#599570]" style={{ width: s.count > 0 ? `${Math.max(6, Math.min(100, (s.count / Math.max(...d.stageBreakdown.map((x: AnyRecord) => x.count), 1)) * 100))}%` : '0%', opacity: 1 - i * .09 }} /></div></div>)}</div> : <Empty title="No active pipeline" detail="Create an opportunity to see momentum by stage." button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>} />}
         </Card>
         <Card>
           <CardTitle title="Today’s follow-ups" detail="Make the next conversation count" right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks <ArrowRight size={12} className="inline" /></Link>} />
@@ -769,44 +744,11 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     </>;
   }
   function Team() {
-    const team: AnyRecord[] = members.data || []; const joins: AnyRecord[] = ((requests.data || []) as AnyRecord[]).map(j => ({ ...j, createdAt: j.joinedAt }));
-    const [initiationCodeInput, setInitiationCodeInput] = useState('');
-    const [updatingCode, setUpdatingCode] = useState(false);
+    const team: AnyRecord[] = ((members.data || []) as AnyRecord[]).filter(m => m.role !== 'super_admin');
+    const joins: AnyRecord[] = ((requests.data || []) as AnyRecord[]).map(j => ({ ...j, createdAt: j.joinedAt }));
     const [assignEmail, setAssignEmail] = useState('');
     const [assignName, setAssignName] = useState('');
     const [assigningEmp, setAssigningEmp] = useState(false);
-
-    useEffect(() => {
-      if (isAdmin) {
-        fetch('/api/team/initiation-code', { credentials: 'include' })
-          .then(res => res.json())
-          .then(data => { if (data?.initiationCode) setInitiationCodeInput(data.initiationCode); })
-          .catch(() => {});
-      }
-    }, [isAdmin]);
-
-    const saveInitiationCode = async () => {
-      if (!initiationCodeInput.trim()) return;
-      setUpdatingCode(true);
-      try {
-        const res = await fetch('/api/team/initiation-code', {
-          method: 'PUT',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initiationCode: initiationCodeInput.trim() }),
-        });
-        if (res.ok) {
-          setNotice({ tone: 'good', text: 'Workspace initiation code updated successfully.' });
-        } else {
-          const errData = await res.json().catch(() => ({}));
-          setNotice({ tone: 'bad', text: errData?.error || 'Could not update initiation code.' });
-        }
-      } catch {
-        setNotice({ tone: 'bad', text: 'Failed to update initiation code.' });
-      } finally {
-        setUpdatingCode(false);
-      }
-    };
 
     const submitAssignEmployee = async (e: React.FormEvent) => {
       e.preventDefault();
@@ -835,7 +777,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     };
 
-    return <><PageHeader title="Team" description="Bring your people in and keep workspace access in good order." action={isAdmin ? <Btn onClick={() => document.getElementById('assign-emp-email')?.focus()}><UserPlus size={15} /> Add teammate</Btn> : null} />{notices}
+    return <><PageHeader title="Team" description="Manage your team members and assign employee workspace access." action={isAdmin ? <Btn onClick={() => document.getElementById('assign-emp-email')?.focus()}><UserPlus size={15} /> Add teammate</Btn> : null} />{notices}
       {isAdmin && <Card className="mb-4">
         <CardTitle title="Assign Employee Access by Email" detail="Write an employee's email address to save it in database. When that employee logs in with Clerk, their dashboard will open immediately." right={<UserCheck size={16} className="text-[#347858]" />} />
         <form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submitAssignEmployee}>
@@ -844,9 +786,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           <Btn type="submit" disabled={assigningEmp || !assignEmail.trim()}><Check size={14} />{assigningEmp ? 'Saving…' : 'Save Employee in Database'}</Btn>
         </form>
       </Card>}
-      {isAdmin && <Card className="mb-4"><CardTitle title="Workspace Initiation Code" detail="Required for new members to complete registration" right={<LockKeyhole size={15} className="text-[#43815f]" />} /><div className="p-4"><p className="mb-3 text-[12px] text-[#63736e]">New team members must enter this initiation code during registration to join your workspace.</p><div className="flex flex-wrap items-center gap-2"><input data-testid="input-workspace-initiation-code" type="text" value={initiationCodeInput} onChange={e => setInitiationCodeInput(e.target.value)} className="w-64 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] font-mono font-semibold text-[#25342f] outline-none focus:border-[#70a88c]" /><Btn onClick={saveInitiationCode} disabled={updatingCode}><Check size={14} />{updatingCode ? 'Saving…' : 'Save Code'}</Btn><Btn kind="outline" onClick={() => { navigator.clipboard.writeText(initiationCodeInput); setNotice({ tone: 'good', text: 'Initiation code copied to clipboard!' }); }}>Copy Code</Btn></div></div></Card>}
-      {isAdmin && <Card className="mb-4"><CardTitle title="Invite a teammate" detail="Add their email here, then ask them to sign up with it. They’ll be approved automatically." right={<Mail size={15} className="text-[#84918b]" />} /><form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={e => { e.preventDefault(); createInvitation.mutate({ data: { email: inviteEmail, role: inviteRole } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); setInviteEmail(''); setFeedback({ tone: 'good', text: `${inviteEmail} is invited. Ask them to sign up with this email address to join automatically.` }); }, onError: () => setFeedback({ tone: 'bad', text: 'Invitation could not be saved. Check the email and try again.' }) }); }}><input id="invite-email" data-testid="input-invite-email" required type="email" placeholder="teammate@company.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" /><select aria-label="Invitation role" data-testid="select-invitation-role" value={inviteRole} onChange={e => setInviteRole(e.target.value as 'member' | 'admin')} className="rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px]"><option value="member">Member</option><option value="admin">Admin</option></select><Btn type="submit" disabled={createInvitation.isPending}><Send size={14} />{createInvitation.isPending ? 'Sending…' : 'Send invitation'}</Btn></form></Card>}
-      <Card className="mb-4"><CardTitle title="Team members" detail={`${team.length} approved members`} right={<ShieldCheck size={15} className="text-[#43815f]" />} />{members.isLoading ? <LoadingRows /> : members.isError ? <Empty title="Couldn’t load the team" detail="Refresh to check approved workspace members." button={<Btn kind="outline" onClick={() => members.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : team.length ? <Table headers={['Member', 'Role', 'Status', 'Joined']} min="min-w-[580px]">{team.map(m => <tr key={m.id} data-testid={`member-${m.id}`}><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={m.name} /><div><p className="text-[12px] font-semibold text-[#35433e]">{m.name}</p><p className="text-[10px] text-[#87938e]">{m.email} · Member ID {m.id}</p></div></div></td><td className="px-4 py-3"><Badge tone={m.role === 'admin' || m.role === 'super_admin' || m.role === 'owner' ? 'purple' : 'neutral'}>{m.role}</Badge></td><td className="px-4 py-3"><ToneStatus value={m.status} /></td><td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(m.joinedAt)}</td></tr>)}</Table> : <Empty title="It starts with your team" detail="The first approved member becomes the workspace owner. Invite teammates when you’re ready." />}</Card>
+      <Card className="mb-4"><CardTitle title="Team members" detail={`${team.length} approved members`} right={<ShieldCheck size={15} className="text-[#43815f]" />} />{members.isLoading ? <LoadingRows /> : members.isError ? <Empty title="Couldn’t load the team" detail="Refresh to check approved workspace members." button={<Btn kind="outline" onClick={() => members.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : team.length ? <Table headers={['Member', 'Role', 'Status', 'Joined']} min="min-w-[580px]">{team.map(m => <tr key={m.id} data-testid={`member-${m.id}`}><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={m.name} /><div><p className="text-[12px] font-semibold text-[#35433e]">{m.name}</p><p className="text-[10px] text-[#87938e]">{m.email} · Member ID {m.id}</p></div></div></td><td className="px-4 py-3"><Badge tone={m.role === 'admin' || m.role === 'owner' ? 'purple' : 'neutral'}>{m.role}</Badge></td><td className="px-4 py-3"><ToneStatus value={m.status} /></td><td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(m.joinedAt)}</td></tr>)}</Table> : <Empty title="It starts with your team" detail="Your team members will appear here once assigned." />}</Card>
       {isAdmin && <Card><CardTitle title="Join requests" detail="Review new people asking to join this workspace" right={<Badge tone={joins.length ? 'amber' : 'neutral'}>{joins.length} pending</Badge>} />{requests.isLoading ? <LoadingRows /> : requests.isError ? <Empty title="Join requests unavailable" detail="Could not load pending access requests." button={<Btn kind="outline" onClick={() => requests.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : joins.length ? <div className="divide-y divide-[#f0f2f1]">{joins.map(j => <div key={j.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5"><Avatar name={j.name || j.email} /><div className="min-w-[160px] flex-1"><p className="text-[12px] font-semibold">{j.name || j.email}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{j.email} · Requested {dateLabel(j.createdAt)}</p></div><Badge tone="amber">Pending review</Badge><Btn kind="soft" disabled={approveRequest.isPending} onClick={() => approveRequest.mutate({ id: j.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); qc.invalidateQueries({ queryKey: getListMembersQueryKey() }); setNotice({ tone: 'good', text: `${j.name || j.email} is now a team member.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not approve this request.' }) })}><CheckCheck size={14} /> Approve</Btn><Btn kind="danger" disabled={rejectRequest.isPending} onClick={() => rejectRequest.mutate({ id: j.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); setNotice({ tone: 'good', text: 'Join request declined.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not decline this request.' }) })}><X size={14} /> Decline</Btn></div>)}</div> : <Empty title="You’re all caught up" detail="New membership requests will appear here for review." />}</Card>}
     </>;
   }
@@ -870,17 +810,9 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const [loadingPending, setLoadingPending] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
     const [compForm, setCompForm] = useState({
-      name: '', adminName: '', adminEmail: '', adminPassword: '', initiationCode: 'SPEEDMATCH2026', industry: 'Software', size: '1-10', website: ''
+      name: '', adminName: '', adminEmail: '', industry: 'Software', size: '1-10', website: ''
     });
     const [savingComp, setSavingComp] = useState(false);
-    const [resetTarget, setResetTarget] = useState<AnyRecord | null>(null);
-    const [passInput, setPassInput] = useState('');
-    const [resettingPass, setResettingPass] = useState(false);
-
-    // Direct Admin assignment by email
-    const [assignAdminEmail, setAssignAdminEmail] = useState('');
-    const [assignAdminName, setAssignAdminName] = useState('');
-    const [assigningAdmin, setAssigningAdmin] = useState(false);
 
     const loadCompanies = useCallback(async () => {
       setLoadingComps(true);
@@ -910,34 +842,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       void loadCompanies();
       void loadPending();
     }, [loadCompanies, loadPending]);
-
-    const submitAssignAdmin = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!assignAdminEmail.trim()) return;
-      setAssigningAdmin(true);
-      try {
-        const res = await fetch('/api/superadmin/assign-admin', {
-          method: 'POST',
-          credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: assignAdminEmail.trim(), name: assignAdminName.trim() }),
-        });
-        if (res.ok) {
-          setNotice({ tone: 'good', text: `Admin "${assignAdminEmail}" saved in database! When this user logs in via Clerk with this email, their dashboard will open immediately.` });
-          setAssignAdminEmail('');
-          setAssignAdminName('');
-          void loadCompanies();
-          void loadPending();
-        } else {
-          const err = await res.json().catch(() => ({}));
-          setNotice({ tone: 'bad', text: err?.error || 'Could not assign admin.' });
-        }
-      } catch {
-        setNotice({ tone: 'bad', text: 'Failed to assign admin.' });
-      } finally {
-        setAssigningAdmin(false);
-      }
-    };
 
     const approveUserAsAdmin = async (id: number, email: string) => {
       try {
@@ -989,6 +893,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
 
     const submitCreateCompany = async (e: React.FormEvent) => {
       e.preventDefault();
+      if (!compForm.name.trim() || !compForm.adminEmail.trim()) return;
       setSavingComp(true);
       try {
         const res = await fetch('/api/superadmin/companies', {
@@ -997,9 +902,9 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           body: JSON.stringify(compForm),
         });
         if (res.ok) {
-          setNotice({ tone: 'good', text: `Company "${compForm.name}" created with Admin "${compForm.adminEmail}"` });
+          setNotice({ tone: 'good', text: `Company "${compForm.name}" created! Admin "${compForm.adminEmail}" will be able to log in via Clerk.` });
           setCreateOpen(false);
-          setCompForm({ name: '', adminName: '', adminEmail: '', adminPassword: '', initiationCode: 'SPEEDMATCH2026', industry: 'Software', size: '1-10', website: '' });
+          setCompForm({ name: '', adminName: '', adminEmail: '', industry: 'Software', size: '1-10', website: '' });
           void loadCompanies();
         } else {
           const err = await res.json().catch(() => ({}));
@@ -1009,31 +914,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         setNotice({ tone: 'bad', text: 'Failed to create company.' });
       } finally {
         setSavingComp(false);
-      }
-    };
-
-    const submitResetPassword = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!resetTarget) return;
-      setResettingPass(true);
-      try {
-        const res = await fetch(`/api/superadmin/companies/${resetTarget.id}/reset-admin-password`, {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ newPassword: passInput }),
-        });
-        if (res.ok) {
-          setNotice({ tone: 'good', text: `Admin password updated for ${resetTarget.name}` });
-          setResetTarget(null);
-          setPassInput('');
-        } else {
-          const err = await res.json().catch(() => ({}));
-          setNotice({ tone: 'bad', text: err?.error || 'Could not reset password.' });
-        }
-      } catch {
-        setNotice({ tone: 'bad', text: 'Failed to reset password.' });
-      } finally {
-        setResettingPass(false);
       }
     };
 
@@ -1050,51 +930,46 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     };
 
-    const editInitiationCodeItem = async (c: AnyRecord) => {
-      const newCode = prompt(`Enter new initiation code for ${c.name}:`, c.initiationCode);
-      if (!newCode || !newCode.trim()) return;
-      try {
-        const res = await fetch(`/api/superadmin/companies/${c.id}/initiation-code`, {
-          method: 'PUT', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ initiationCode: newCode.trim() }),
-        });
-        if (res.ok) {
-          setNotice({ tone: 'good', text: `Initiation code updated for ${c.name}` });
-          void loadCompanies();
-        }
-      } catch {
-        setNotice({ tone: 'bad', text: 'Could not update initiation code.' });
-      }
-    };
-
     return <>
-      <PageHeader title="Super Admin Workspace Management" description="Assign Admin accounts by email, review access requests with custom messages, and manage workspaces." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company & Admin</Btn>} />
+      <PageHeader title="Super Admin Workspace Management" description="Create company workspaces, assign admin access by email, and review user access requests." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company Workspace & Assign Admin</Btn>} />
       {notices}
 
-      {/* Card 1: Assign Admin by Email */}
+      {/* Unified Card: Create Company Workspace & Assign Admin */}
       <Card className="mb-5">
-        <CardTitle title="Assign Admin Access by Email" detail="Write an email address to save it in database as Admin. When that admin logs in via Clerk with that email, their dashboard will unlock immediately." right={<ShieldCheck size={16} className="text-[#347858]" />} />
-        <form className="flex flex-col gap-3 p-5 sm:flex-row" onSubmit={submitAssignAdmin}>
+        <CardTitle
+          title="Create Company Workspace & Assign Admin"
+          detail="Write the company name and admin email to save in database. When this admin logs in via Clerk, their dashboard will unlock immediately."
+          right={<ShieldCheck size={16} className="text-[#347858]" />}
+        />
+        <form className="flex flex-col gap-3 p-5 sm:flex-row" onSubmit={submitCreateCompany}>
           <input
-            data-testid="input-assign-admin-email"
-            type="email"
+            data-testid="input-create-company-name"
+            type="text"
             required
-            placeholder="admin@company.com"
-            value={assignAdminEmail}
-            onChange={e => setAssignAdminEmail(e.target.value)}
+            placeholder="Company Name (e.g. Acme Corp)"
+            value={compForm.name}
+            onChange={e => setCompForm({ ...compForm, name: e.target.value })}
             className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
           />
           <input
-            data-testid="input-assign-admin-name"
+            data-testid="input-create-admin-email"
+            type="email"
+            required
+            placeholder="admin@company.com"
+            value={compForm.adminEmail}
+            onChange={e => setCompForm({ ...compForm, adminEmail: e.target.value })}
+            className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
+          />
+          <input
+            data-testid="input-create-admin-name"
             type="text"
             placeholder="Admin Full Name (optional)"
-            value={assignAdminName}
-            onChange={e => setAssignAdminName(e.target.value)}
+            value={compForm.adminName}
+            onChange={e => setCompForm({ ...compForm, adminName: e.target.value })}
             className="min-w-0 sm:w-56 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
           />
-          <Btn type="submit" disabled={assigningAdmin || !assignAdminEmail.trim()}>
-            <Check size={14} /> {assigningAdmin ? 'Saving…' : 'Save Admin in Database'}
+          <Btn type="submit" disabled={savingComp || !compForm.name.trim() || !compForm.adminEmail.trim()}>
+            <Check size={14} /> {savingComp ? 'Saving…' : 'Create & Assign Admin'}
           </Btn>
         </form>
       </Card>
@@ -1153,7 +1028,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       {/* Card 3: Registered Companies & Admins */}
       <Card>
         <CardTitle title="Registered Companies & Workspace Admins" detail={`${companiesList.length} total companies`} right={<Building2 size={16} className="text-[#347858]" />} />
-        {loadingComps ? <LoadingRows /> : companiesList.length ? <Table headers={['Company Workspace', 'Admin Details', 'Initiation Code', 'Members', 'Actions']}>
+        {loadingComps ? <LoadingRows /> : companiesList.length ? <Table headers={['Company Workspace', 'Assigned Admin', 'Status', 'Members', 'Actions']}>
           {companiesList.map(c => <tr key={c.id}>
             <td className="px-5 py-3">
               <div><p className="text-[12px] font-bold text-[#273832]">{c.name}</p><p className="text-[10px] text-[#808d87]">{c.industry} · {c.website || 'No website'}</p></div>
@@ -1162,41 +1037,26 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
               <div><p className="text-[12px] font-semibold text-[#32423d]">{c.adminName}</p><p className="text-[10px] font-mono text-[#667671]">{c.adminEmail}</p></div>
             </td>
             <td className="px-4 py-3">
-              <div className="flex items-center gap-2">
-                <span className="rounded bg-[#edf5f0] px-2 py-1 font-mono text-[12px] font-bold text-[#285e43]">{c.initiationCode}</span>
-                <button onClick={() => editInitiationCodeItem(c)} className="text-[11px] font-semibold text-[#28785b] hover:underline">Edit</button>
-              </div>
+              <Badge tone="purple">Admin Active</Badge>
             </td>
             <td className="px-4 py-3 text-[12px] font-semibold text-[#485752]">{c.memberCount}</td>
             <td className="px-4 py-3">
-              <div className="flex items-center gap-2">
-                <Btn kind="soft" onClick={() => setResetTarget(c)}><LockKeyhole size={13} /> Reset Pass</Btn>
-                <Btn kind="danger" onClick={() => deleteCompanyItem(c)}><Trash2 size={13} /> Delete</Btn>
-              </div>
+              <Btn kind="danger" onClick={() => deleteCompanyItem(c)}><Trash2 size={13} /> Delete</Btn>
             </td>
           </tr>)}
-        </Table> : <Empty title="No companies configured" detail="Create your first company workspace to generate admin credentials and an initiation code." button={<Btn onClick={() => setCreateOpen(true)}><Plus size={14} /> Create Company & Admin</Btn>} />}
+        </Table> : <Empty title="No companies configured" detail="Create your first company workspace to assign admin credentials." button={<Btn onClick={() => setCreateOpen(true)}><Plus size={14} /> Create Company Workspace & Assign Admin</Btn>} />}
       </Card>
-      {createOpen && <Dialog title="Create Company & Workspace Admin" onClose={() => setCreateOpen(false)}>
+      {createOpen && <Dialog title="Create Company Workspace & Assign Admin" onClose={() => setCreateOpen(false)}>
         <form onSubmit={submitCreateCompany} className="space-y-3 p-5">
-          <FieldInput field={{ key: 'name', label: 'Company Name', required: true }} value={compForm.name} set={v => setCompForm({ ...compForm, name: v })} />
-          <FieldInput field={{ key: 'adminName', label: 'Admin Full Name', required: true }} value={compForm.adminName} set={v => setCompForm({ ...compForm, adminName: v })} />
-          <FieldInput field={{ key: 'adminEmail', label: 'Admin Email (Sign-in ID)', type: 'email', required: true }} value={compForm.adminEmail} set={v => setCompForm({ ...compForm, adminEmail: v })} />
-          <FieldInput field={{ key: 'adminPassword', label: 'Admin Password', type: 'password', required: true }} value={compForm.adminPassword} set={v => setCompForm({ ...compForm, adminPassword: v })} />
-          <FieldInput field={{ key: 'initiationCode', label: 'Initiation Code for User Registration', required: true }} value={compForm.initiationCode} set={v => setCompForm({ ...compForm, initiationCode: v })} />
+          <FieldInput field={{ key: 'name', label: 'Company Name', required: true, placeholder: 'e.g. Acme Corp' }} value={compForm.name} set={v => setCompForm({ ...compForm, name: v })} />
+          <FieldInput field={{ key: 'adminEmail', label: 'Admin Email (Clerk login email)', type: 'email', required: true, placeholder: 'admin@company.com' }} value={compForm.adminEmail} set={v => setCompForm({ ...compForm, adminEmail: v })} />
+          <FieldInput field={{ key: 'adminName', label: 'Admin Full Name (optional)', placeholder: 'e.g. Jane Doe' }} value={compForm.adminName} set={v => setCompForm({ ...compForm, adminName: v })} />
+          <FieldInput field={{ key: 'industry', label: 'Industry (optional)', placeholder: 'e.g. Software' }} value={compForm.industry} set={v => setCompForm({ ...compForm, industry: v })} />
+          <FieldInput field={{ key: 'website', label: 'Website (optional)', placeholder: 'e.g. acme.com' }} value={compForm.website} set={v => setCompForm({ ...compForm, website: v })} />
+          <p className="text-[11px] text-[#63736e]">When this admin signs in via Clerk with this email, their Admin Dashboard will unlock immediately.</p>
           <div className="flex justify-end gap-2 pt-3">
             <Btn kind="outline" onClick={() => setCreateOpen(false)}>Cancel</Btn>
-            <Btn type="submit" disabled={savingComp}>{savingComp ? 'Creating…' : 'Create Company & Admin'}</Btn>
-          </div>
-        </form>
-      </Dialog>}
-      {resetTarget && <Dialog title={`Reset Password for ${resetTarget.name}`} onClose={() => setResetTarget(null)}>
-        <form onSubmit={submitResetPassword} className="space-y-4 p-5">
-          <p className="text-[12px] text-[#63736e]">Updating password for workspace admin: <strong>{resetTarget.adminEmail}</strong></p>
-          <FieldInput field={{ key: 'passInput', label: 'New Password (min 8 chars)', type: 'password', required: true }} value={passInput} set={setPassInput} />
-          <div className="flex justify-end gap-2 pt-2">
-            <Btn kind="outline" onClick={() => setResetTarget(null)}>Cancel</Btn>
-            <Btn type="submit" disabled={resettingPass}>{resettingPass ? 'Resetting…' : 'Update Password'}</Btn>
+            <Btn type="submit" disabled={savingComp}>{savingComp ? 'Creating…' : 'Create & Assign Admin'}</Btn>
           </div>
         </form>
       </Dialog>}
@@ -1205,16 +1065,17 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
 
   let content: ReactNode;
   switch (path) {
-    case '/dashboard': content = <Dashboard />; break;
-    case '/contacts': content = <ResourcePage entity="contacts" />; break;
-    case '/deals': content = <ResourcePage entity="deals" />; break;
-    case '/tasks': content = <ResourcePage entity="tasks" />; break;
-    case '/analytics': content = <Redirect to="/dashboard" />; break;
-    case '/team': content = <Team />; break;
-    case '/inbox': content = <InboxPage />; break;
+    case '/dashboard': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Dashboard />; break;
+    case '/contacts': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="contacts" />; break;
+    case '/companies': content = <ResourcePage entity="companies" />; break;
+    case '/deals': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="deals" />; break;
+    case '/tasks': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="tasks" />; break;
+    case '/analytics': content = <Redirect to={member?.role === 'super_admin' ? '/super-admin' : '/dashboard'} />; break;
+    case '/team': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Team />; break;
+    case '/inbox': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <InboxPage />; break;
     case '/community': content = <Community />; break;
     case '/super-admin': content = <SuperAdminPage />; break;
-    default: content = <NotFound />;
+    default: content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <NotFound />;
   }
   if (!approved && member?.role !== 'super_admin') return <AppShell path={path} member={member}><Card className="mt-16 mx-auto max-w-lg"><Empty title="Checking workspace access" detail="Your membership is still being confirmed. CRM data remains private until access is approved." button={<Btn kind="outline" onClick={() => window.location.reload()}><RotateCw size={14} /> Check status</Btn>} /></Card></AppShell>;
   return <AppShell path={path} member={member}><div className="fade-in">{failed && <NoticeBar notice={{ tone: 'bad', text: 'Some workspace data could not be loaded. Retry the section below.' }} clear={() => qs.forEach((q: any) => q.refetch())} />}{content}</div>{modal && <RecordDialog entity={modal.entity} initial={modal.row} onClose={() => setModal(null)} onSave={data => saveResource(modal.entity, data)} busy={allPending} />}</AppShell>;

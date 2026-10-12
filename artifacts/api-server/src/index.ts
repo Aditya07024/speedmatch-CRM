@@ -11,15 +11,15 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-void ensureSuperAdminExists().then(() => {
-  app.listen(port, (err) => {
-    if (err) {
-      logger.error({ err }, "Error listening on port");
-      process.exit(1);
-    }
+app.listen(port, (err) => {
+  if (err) {
+    logger.error({ err }, "Error listening on port");
+    process.exit(1);
+  }
 
-    logger.info({ port }, "Server listening");
+  logger.info({ port }, "Server listening");
+
+  void ensureSuperAdminExists().catch((superErr) => {
+    logger.error({ err: superErr }, "Failed to initialize super admin");
   });
-}).catch((err) => {
-  logger.error({ err }, "Failed to initialize super admin or start server");
 });

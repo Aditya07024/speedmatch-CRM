@@ -47,13 +47,11 @@ router.get("/superadmin/companies", async (_req, res): Promise<void> => {
   res.json(results);
 });
 
-// POST /api/superadmin/companies - Create company & Admin account
+// POST /api/superadmin/companies - Create company & Assign Admin account
 router.post("/superadmin/companies", async (req, res): Promise<void> => {
   const name = String(req.body?.name ?? "").trim();
   const adminName = String(req.body?.adminName ?? "").trim();
   const adminEmail = String(req.body?.adminEmail ?? "").trim().toLowerCase();
-  const adminPassword = String(req.body?.adminPassword ?? "").trim();
-  const initiationCode = String(req.body?.initiationCode ?? req.body?.initiation_code ?? "").trim() || "SPEEDMATCH2026";
   const industry = String(req.body?.industry ?? "Software").trim();
   const website = String(req.body?.website ?? "").trim();
   const size = String(req.body?.size ?? "1-10").trim();
@@ -66,21 +64,6 @@ router.post("/superadmin/companies", async (req, res): Promise<void> => {
     res.status(400).json({ error: "Valid Admin Email is required" });
     return;
   }
-  if (!adminPassword || adminPassword.length < 8) {
-    res.status(400).json({ error: "Admin Password must be at least 8 characters" });
-    return;
-  }
-
-  // Check if admin email already exists
-  const [existingEmail] = await db
-    .select({ id: teamMembersTable.id })
-    .from(teamMembersTable)
-    .where(sql`lower(${teamMembersTable.email}) = ${adminEmail}`)
-    .limit(1);
-  if (existingEmail) {
-    res.status(409).json({ error: "An account with this email already exists" });
-    return;
-  }
 
   // Insert company
   const [company] = await db
@@ -91,26 +74,44 @@ router.post("/superadmin/companies", async (req, res): Promise<void> => {
       website,
       size,
       status: "Active",
-      initiationCode,
       adminEmail,
     })
     .returning();
 
-  // Create workspace admin user for this company
-  const [adminUser] = await db
-    .insert(teamMembersTable)
-    .values({
-      authId: randomUUID(),
-      name: adminName || `${name} Admin`,
-      email: adminEmail,
-      passwordHash: hashPassword(adminPassword),
-      role: "admin",
-      status: "active",
-      companyId: company.id,
-    })
-    .returning();
+  // Check if admin user already exists
+  const [existingUser] = await db
+    .select({ id: teamMembersTable.id, name: teamMembersTable.name })
+    .from(teamMembersTable)
+    .where(sql`lower(${teamMembersTable.email}) = ${adminEmail}`)
+    .limit(1);
 
-  await addActivity("company", "New company workspace created", `${name} (${initiationCode})`);
+  let adminUser;
+  if (existingUser) {
+    [adminUser] = await db
+      .update(teamMembersTable)
+      .set({
+        name: adminName || existingUser.name,
+        role: "admin",
+        status: "active",
+        companyId: company.id,
+      })
+      .where(eq(teamMembersTable.id, existingUser.id))
+      .returning();
+  } else {
+    [adminUser] = await db
+      .insert(teamMembersTable)
+      .values({
+        authId: randomUUID(),
+        name: adminName || `${name} Admin`,
+        email: adminEmail,
+        role: "admin",
+        status: "active",
+        companyId: company.id,
+      })
+      .returning();
+  }
+
+  await addActivity("company", "New company workspace created & Admin assigned", `${name} (${adminEmail})`);
 
   res.status(201).json({
     company: {

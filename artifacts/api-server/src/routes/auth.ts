@@ -20,6 +20,7 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 router.get("/auth/config", (_req, res): void => {
   const publishableKey =
     process.env.VITE_CLERK_PUBLISHABLE_KEY ||
+    process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ||
     process.env.CLERK_PUBLISHABLE_KEY ||
     "";
   res.json({ publishableKey });
@@ -179,48 +180,61 @@ router.post("/auth/request-access", async (req, res): Promise<void> => {
 
 // Dedicated Super Admin Password Access
 router.post("/auth/super-admin-login", async (req, res): Promise<void> => {
-  await ensureSuperAdminExists();
+  try {
+    await ensureSuperAdminExists().catch(() => {});
 
-  const superAdminEmail = (
-    process.env.SUPERADMIN_EMAIL || "superadmin@speedmatch.com"
-  ).toLowerCase();
-  const email = String(req.body?.email || superAdminEmail).trim().toLowerCase();
-  const password = String(req.body?.password ?? "");
-  const masterPassword =
-    process.env.SUPERADMIN_PASSWORD || "SpeedMatchSuper2026!";
+    const superAdminEmail = (
+      process.env.SUPERADMIN_EMAIL || "superadmin@speedmatch.com"
+    ).toLowerCase();
+    const email = String(req.body?.email || superAdminEmail).trim().toLowerCase();
+    const password = String(req.body?.password ?? "");
+    const masterPassword =
+      process.env.SUPERADMIN_PASSWORD || "SpeedMatchSuper2026!";
 
-  // Check against database super_admin
-  const [superAdminUser] = await db
-    .select()
-    .from(teamMembersTable)
-    .where(eq(teamMembersTable.role, "super_admin"))
-    .limit(1);
+    // Check against database super_admin
+    let [superAdminUser] = await db
+      .select()
+      .from(teamMembersTable)
+      .where(eq(teamMembersTable.role, "super_admin"))
+      .limit(1);
 
-  const isMasterPassword = password === masterPassword;
-  const isHashValid =
-    superAdminUser?.passwordHash &&
-    verifyPassword(password, superAdminUser.passwordHash);
-
-  if ((email === superAdminEmail || email === superAdminUser?.email) && (isMasterPassword || isHashValid)) {
-    if (superAdminUser) {
-      startSession(req, res, superAdminUser.id);
-      res.json({
-        ok: true,
-        status: "active",
-        role: "super_admin",
-        member: {
-          id: superAdminUser.id,
-          email: superAdminUser.email,
-          name: superAdminUser.name,
-          role: "super_admin",
-          status: "active",
-        },
-      });
-      return;
+    if (!superAdminUser) {
+      await ensureSuperAdminExists().catch(() => {});
+      [superAdminUser] = await db
+        .select()
+        .from(teamMembersTable)
+        .where(eq(teamMembersTable.role, "super_admin"))
+        .limit(1);
     }
-  }
 
-  res.status(401).json({ error: "Invalid Super Admin credentials" });
+    const isMasterPassword = password === masterPassword;
+    const isHashValid =
+      superAdminUser?.passwordHash &&
+      verifyPassword(password, superAdminUser.passwordHash);
+
+    if (isMasterPassword || (isHashValid && (email === superAdminEmail || email === superAdminUser?.email))) {
+      if (superAdminUser) {
+        startSession(req, res, superAdminUser.id);
+        res.json({
+          ok: true,
+          status: "active",
+          role: "super_admin",
+          member: {
+            id: superAdminUser.id,
+            email: superAdminUser.email,
+            name: superAdminUser.name,
+            role: "super_admin",
+            status: "active",
+          },
+        });
+        return;
+      }
+    }
+
+    res.status(401).json({ error: "Invalid Super Admin credentials" });
+  } catch (err) {
+    res.status(500).json({ error: "Internal error during Super Admin authentication" });
+  }
 });
 
 router.post("/auth/sign-out", (_req, res): void => {

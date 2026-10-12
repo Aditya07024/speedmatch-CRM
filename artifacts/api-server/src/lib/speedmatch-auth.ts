@@ -40,22 +40,58 @@ export async function ensureGlobalSettings(): Promise<string> {
 }
 
 export async function ensureSuperAdminExists(): Promise<void> {
-  await ensureGlobalSettings();
-  const [existingSuper] = await db
-    .select({ id: teamMembersTable.id })
-    .from(teamMembersTable)
-    .where(eq(teamMembersTable.role, "super_admin"))
-    .limit(1);
+  try {
+    await ensureGlobalSettings().catch(() => {});
+    const superAdminEmail = (
+      process.env.SUPERADMIN_EMAIL || "superadmin@speedmatch.com"
+    ).toLowerCase().trim();
+    const superAdminPassword =
+      process.env.SUPERADMIN_PASSWORD || "SpeedMatchSuper2026!";
 
-  if (!existingSuper) {
-    await db.insert(teamMembersTable).values({
-      authId: randomUUID(),
-      email: "superadmin@speedmatch.com",
-      name: "Super Admin",
-      passwordHash: hashPassword("superadmin123"),
-      role: "super_admin",
-      status: "active",
-    });
+    const [existingSuper] = await db
+      .select({ id: teamMembersTable.id, email: teamMembersTable.email })
+      .from(teamMembersTable)
+      .where(eq(teamMembersTable.role, "super_admin"))
+      .limit(1);
+
+    if (existingSuper) {
+      await db
+        .update(teamMembersTable)
+        .set({
+          passwordHash: hashPassword(superAdminPassword),
+          status: "active",
+        })
+        .where(eq(teamMembersTable.id, existingSuper.id));
+      return;
+    }
+
+    const [existingByEmail] = await db
+      .select({ id: teamMembersTable.id })
+      .from(teamMembersTable)
+      .where(sql`lower(${teamMembersTable.email}) = ${superAdminEmail}`)
+      .limit(1);
+
+    if (existingByEmail) {
+      await db
+        .update(teamMembersTable)
+        .set({
+          role: "super_admin",
+          status: "active",
+          passwordHash: hashPassword(superAdminPassword),
+        })
+        .where(eq(teamMembersTable.id, existingByEmail.id));
+    } else {
+      await db.insert(teamMembersTable).values({
+        authId: randomUUID(),
+        email: superAdminEmail,
+        name: "Super Admin",
+        passwordHash: hashPassword(superAdminPassword),
+        role: "super_admin",
+        status: "active",
+      });
+    }
+  } catch (err) {
+    console.error("ensureSuperAdminExists error:", err);
   }
 }
 

@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, ne, sql } from "drizzle-orm";
 import {
   companiesTable,
   db,
@@ -52,10 +52,17 @@ router.get("/team/me", requireAuthenticated, async (req, res): Promise<void> => 
 router.use("/team", requireActiveMember);
 
 router.get("/team/members", async (_req, res): Promise<void> => {
+  const member = getRequestMember(res);
   const rows = await db
     .select()
     .from(teamMembersTable)
-    .where(eq(teamMembersTable.status, "active"))
+    .where(
+      and(
+        eq(teamMembersTable.status, "active"),
+        ne(teamMembersTable.role, "super_admin"),
+        member?.companyId ? eq(teamMembersTable.companyId, member.companyId) : sql`true`,
+      ),
+    )
     .orderBy(teamMembersTable.name);
   res.json(ListMembersResponse.parse(rows.map(memberForResponse)));
 });
