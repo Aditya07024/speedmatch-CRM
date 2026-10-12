@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
-import { count, desc, eq, sql } from "drizzle-orm";
+import { and, count, desc, eq, ne, sql } from "drizzle-orm";
 import {
   companiesTable,
   db,
@@ -213,6 +213,95 @@ router.delete("/superadmin/companies/:id", async (req, res): Promise<void> => {
   res.status(204).end();
 });
 
+// GET /api/superadmin/all-users - List all registered users (approved admins, employees, pending)
+router.get("/superadmin/all-users", async (_req, res): Promise<void> => {
+  // Ensure any active admin without a company gets a company created
+  const orphanAdmins = await db
+    .select()
+    .from(teamMembersTable)
+    .where(and(eq(teamMembersTable.role, "admin"), eq(teamMembersTable.status, "active"), sql`${teamMembersTable.companyId} IS NULL`));
+
+  for (const admin of orphanAdmins) {
+    const compName = `${admin.name.trim() || admin.email.split("@")[0]}'s Workspace`;
+    const [comp] = await db
+      .insert(companiesTable)
+      .values({
+        name: compName,
+        adminEmail: admin.email,
+        owner: admin.name,
+      })
+      .returning();
+    if (comp) {
+      await db
+        .update(teamMembersTable)
+        .set({ companyId: comp.id })
+        .where(eq(teamMembersTable.id, admin.id));
+    }
+  }
+
+  const users = await db
+    .select({
+      id: teamMembersTable.id,
+      name: teamMembersTable.name,
+      email: teamMembersTable.email,
+      role: teamMembersTable.role,
+      status: teamMembersTable.status,
+      companyId: teamMembersTable.companyId,
+      companyName: companiesTable.name,
+      requestMessage: teamMembersTable.requestMessage,
+      joinedAt: teamMembersTable.joinedAt,
+      avatarUrl: teamMembersTable.avatarUrl,
+    })
+    .from(teamMembersTable)
+    .leftJoin(companiesTable, eq(teamMembersTable.companyId, companiesTable.id))
+    .where(ne(teamMembersTable.role, "super_admin"))
+    .orderBy(desc(teamMembersTable.joinedAt));
+
+  res.json(users.map(u => ({ ...u, joinedAt: asIso(u.joinedAt) })));
+});
+
+// PATCH /api/superadmin/users/:id - Update user role, status, or company
+router.patch("/superadmin/users/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const { role, status, companyId } = req.body ?? {};
+  const updates: Partial<typeof teamMembersTable.$inferInsert> = {};
+
+  if (role && (role === "admin" || role === "member")) updates.role = role;
+  if (status && (status === "active" || status === "pending" || status === "rejected")) updates.status = status;
+  if (companyId !== undefined) updates.companyId = companyId ? Number(companyId) : null;
+
+  const [updated] = await db
+    .update(teamMembersTable)
+    .set(updates)
+    .where(eq(teamMembersTable.id, id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "User not found" });
+    return;
+  }
+
+  await addActivity("team", `Updated access for ${updated.name}`, `${updated.email} (${updated.role}, ${updated.status})`);
+  res.json({ ok: true, member: updated });
+});
+
+// DELETE /api/superadmin/users/:id - Delete / remove user account
+router.delete("/superadmin/users/:id", async (req, res): Promise<void> => {
+  const id = Number(req.params.id);
+  const [deleted] = await db
+    .delete(teamMembersTable)
+    .where(and(eq(teamMembersTable.id, id), ne(teamMembersTable.role, "super_admin")))
+    .returning();
+
+  if (!deleted) {
+    res.status(404).json({ error: "User not found or cannot delete super admin" });
+    return;
+  }
+
+  await addActivity("team", `Removed user access`, deleted.email);
+  res.status(204).end();
+});
+
 // GET /api/superadmin/pending-requests - List all users pending approval with custom messages
 router.get("/superadmin/pending-requests", async (_req, res): Promise<void> => {
   const requests = await db
@@ -236,16 +325,41 @@ router.get("/superadmin/pending-requests", async (_req, res): Promise<void> => {
 // POST /api/superadmin/requests/:id/approve-admin - Approve pending request as Admin
 router.post("/superadmin/requests/:id/approve-admin", async (req, res): Promise<void> => {
   const id = Number(req.params.id);
-  const [updated] = await db
-    .update(teamMembersTable)
-    .set({ role: "admin", status: "active" })
+  const [member] = await db
+    .select()
+    .from(teamMembersTable)
     .where(eq(teamMembersTable.id, id))
-    .returning();
+    .limit(1);
 
-  if (!updated) {
+  if (!member) {
     res.status(404).json({ error: "Request not found" });
     return;
   }
+
+  let companyId = member.companyId;
+  if (!companyId) {
+    const compName = `${member.name.trim() || member.email.split("@")[0]}'s Workspace`;
+    const [comp] = await db
+      .insert(companiesTable)
+      .values({
+        name: compName,
+        adminEmail: member.email,
+        owner: member.name,
+      })
+      .returning();
+    if (comp) companyId = comp.id;
+  }
+
+  const [updated] = await db
+    .update(teamMembersTable)
+    .set({
+      role: "admin",
+      status: "active",
+      companyId: companyId ?? null,
+    })
+    .where(eq(teamMembersTable.id, id))
+    .returning();
+
   await addActivity("team", "Approved user as Workspace Admin", updated.email);
   res.json({ ok: true, member: updated });
 });

@@ -1,7 +1,12 @@
 import { Router, type IRouter } from "express";
 import { randomUUID } from "node:crypto";
-import { eq, sql } from "drizzle-orm";
-import { db, teamMembersTable } from "@workspace/db";
+import { and, eq, sql } from "drizzle-orm";
+import {
+  companiesTable,
+  db,
+  invitationsTable,
+  teamMembersTable,
+} from "@workspace/db";
 import { createMember, ensureSuperAdminExists } from "../lib/speedmatch-auth";
 import {
   endSession,
@@ -42,6 +47,20 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
     return;
   }
 
+  // Check if email is assigned as company admin
+  const [assignedCompany] = await db
+    .select()
+    .from(companiesTable)
+    .where(sql`lower(${companiesTable.adminEmail}) = ${email}`)
+    .limit(1);
+
+  // Check if email has pending invitation from an admin
+  const [invitation] = await db
+    .select()
+    .from(invitationsTable)
+    .where(and(sql`lower(${invitationsTable.email}) = ${email}`, eq(invitationsTable.status, "pending")))
+    .limit(1);
+
   // Check if member already exists in team database
   const [existing] = await db
     .select()
@@ -50,32 +69,44 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
     .limit(1);
 
   if (existing) {
-    // Update authId and avatar if needed
     const updates: Partial<typeof teamMembersTable.$inferInsert> = {
       authId: clerkId,
     };
     if (avatarUrl && !existing.avatarUrl) updates.avatarUrl = avatarUrl;
     if (name && (!existing.name || existing.name === existing.email.split("@")[0])) updates.name = name;
 
-    await db
+    // If pre-assigned as company admin or invited by a teammate, activate immediately!
+    if (assignedCompany) {
+      updates.role = "admin";
+      updates.status = "active";
+      if (!existing.companyId) updates.companyId = assignedCompany.id;
+    } else if (invitation) {
+      updates.role = invitation.role || "member";
+      updates.status = "active";
+      await db.update(invitationsTable).set({ status: "accepted" }).where(eq(invitationsTable.id, invitation.id));
+    }
+
+    const [updated] = await db
       .update(teamMembersTable)
       .set(updates)
-      .where(eq(teamMembersTable.id, existing.id));
+      .where(eq(teamMembersTable.id, existing.id))
+      .returning();
 
-    startSession(req, res, existing.id);
+    const current = updated || existing;
+    startSession(req, res, current.id);
 
-    // If pre-assigned by Super Admin or Admin as active:
-    if (existing.status === "active") {
+    if (current.status === "active") {
       res.json({
         ok: true,
-        status: existing.status,
-        role: existing.role,
+        status: current.status,
+        role: current.role,
         member: {
-          id: existing.id,
-          email: existing.email,
-          name: existing.name,
-          role: existing.role,
-          status: existing.status,
+          id: current.id,
+          email: current.email,
+          name: current.name,
+          role: current.role,
+          status: current.status,
+          companyId: current.companyId,
         },
       });
       return;
@@ -85,30 +116,45 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
     res.json({
       ok: false,
       status: "pending",
-      role: existing.role,
+      role: current.role,
       requiresSuperAdminApproval: true,
-      requestMessage: existing.requestMessage,
+      requestMessage: current.requestMessage,
       member: {
-        id: existing.id,
-        email: existing.email,
-        name: existing.name,
-        role: existing.role,
-        status: existing.status,
+        id: current.id,
+        email: current.email,
+        name: current.name,
+        role: current.role,
+        status: current.status,
+        companyId: current.companyId,
       },
     });
     return;
   }
 
   // User does NOT exist in database (self-registered on Clerk)
-  // Access control rule: "no one can create a dashboard by themself"
+  let initialRole = "member";
+  let initialStatus = "pending";
+  let initialCompanyId: number | null = null;
+
+  if (assignedCompany) {
+    initialRole = "admin";
+    initialStatus = "active";
+    initialCompanyId = assignedCompany.id;
+  } else if (invitation) {
+    initialRole = invitation.role || "member";
+    initialStatus = "active";
+    await db.update(invitationsTable).set({ status: "accepted" }).where(eq(invitationsTable.id, invitation.id));
+  }
+
   const [created] = await db
     .insert(teamMembersTable)
     .values({
       authId: clerkId,
       email,
       name: name || email.split("@")[0],
-      role: "member",
-      status: "pending",
+      role: initialRole,
+      status: initialStatus,
+      companyId: initialCompanyId,
       avatarUrl: avatarUrl || null,
       requestMessage: null,
     })
@@ -119,11 +165,11 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
   }
 
   res.json({
-    ok: false,
-    status: "pending",
-    role: "member",
-    requiresSuperAdminApproval: true,
-    message: "To login in this platform notify superadmin",
+    ok: initialStatus === "active",
+    status: initialStatus,
+    role: initialRole,
+    requiresSuperAdminApproval: initialStatus !== "active",
+    message: initialStatus === "active" ? "Welcome" : "To login in this platform notify superadmin",
     member: created
       ? {
           id: created.id,
@@ -131,6 +177,7 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
           name: created.name,
           role: created.role,
           status: created.status,
+          companyId: created.companyId,
         }
       : null,
   });

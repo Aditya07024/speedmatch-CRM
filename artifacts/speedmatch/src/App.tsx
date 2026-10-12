@@ -245,11 +245,28 @@ function SuperAdminModal() {
 }
 
 function UnauthorizedGate({ member }: { member: AnyRecord }) {
-  const { refresh, signOut, requestAccess } = useAuth();
+  const { refresh, signOut, requestAccess, setSuperAdminModalOpen } = useAuth();
   const [customMsg, setCustomMsg] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [feedback, setFeedback] = useState<Notice>(null);
   const [checking, setChecking] = useState(false);
+
+  // Auto-poll approval status every 3 seconds so the moment Super Admin approves, dashboard opens!
+  useEffect(() => {
+    const timer = setInterval(async () => {
+      try {
+        const res = await fetch('/api/team/me', { credentials: 'include' });
+        if (res.ok) {
+          const m = await res.json();
+          if (m?.status === 'active') {
+            await refresh();
+            window.location.reload();
+          }
+        }
+      } catch {}
+    }, 3000);
+    return () => clearInterval(timer);
+  }, [refresh]);
 
   const handleSend = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -271,10 +288,73 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
     }
   };
 
+  const [loggingOut, setLoggingOut] = useState(false);
+
+  const handleSignOut = async () => {
+    setLoggingOut(true);
+    try {
+      if (window.Clerk?.signOut) {
+        await window.Clerk.signOut();
+      }
+    } catch {}
+    try {
+      await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' });
+    } catch {}
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+    } catch {}
+    client.clear();
+    window.location.replace(`${basePath}/sign-in`);
+  };
+
   const handleCheckStatus = async () => {
     setChecking(true);
-    await refresh();
-    setChecking(false);
+    setFeedback(null);
+    try {
+      // Re-sync with Clerk if user is signed in
+      if (window.Clerk?.user) {
+        const u = window.Clerk.user;
+        const email = u.primaryEmailAddress?.emailAddress;
+        if (email) {
+          const syncRes = await fetch('/api/auth/clerk-sync', {
+            method: 'POST',
+            credentials: 'include',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              email,
+              name: u.fullName || u.firstName || email.split('@')[0],
+              clerkId: u.id,
+              avatarUrl: u.imageUrl,
+            }),
+          });
+          if (syncRes.ok) {
+            const data = await syncRes.json();
+            if (data?.status === 'active' || data?.ok) {
+              setFeedback({ tone: 'good', text: 'Approval confirmed! Launching your workspace…' });
+              await refresh();
+              setTimeout(() => window.location.reload(), 400);
+              return;
+            }
+          }
+        }
+      }
+      await refresh();
+      const res = await fetch('/api/team/me', { credentials: 'include' });
+      if (res.ok) {
+        const m = await res.json();
+        if (m?.status === 'active') {
+          setFeedback({ tone: 'good', text: 'Approval confirmed! Launching your workspace…' });
+          setTimeout(() => window.location.reload(), 400);
+          return;
+        }
+      }
+      setFeedback({ tone: 'info', text: 'Checked: Your account is still awaiting Super Admin approval.' });
+    } catch {
+      setFeedback({ tone: 'bad', text: 'Could not connect to verify status. Please retry in a moment.' });
+    } finally {
+      setChecking(false);
+    }
   };
 
   return (
@@ -305,7 +385,7 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
         </div>
 
         {feedback && (
-          <div className={`mt-4 rounded-lg border px-3.5 py-2.5 text-[12px] ${feedback.tone === 'good' ? 'border-[#cae6d5] bg-[#edf8f1] text-[#28684b]' : 'border-[#f0d0ca] bg-[#fff3f0] text-[#98473d]'}`}>
+          <div className={`mt-4 rounded-lg border px-3.5 py-2.5 text-[12px] ${feedback.tone === 'good' ? 'border-[#cae6d5] bg-[#edf8f1] text-[#28684b]' : feedback.tone === 'info' ? 'border-[#d0e0eb] bg-[#f0f6fa] text-[#24587a]' : 'border-[#f0d0ca] bg-[#fff3f0] text-[#98473d]'}`}>
             {feedback.text}
           </div>
         )}
@@ -328,7 +408,7 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
               rows={3}
               value={customMsg}
               onChange={e => setCustomMsg(e.target.value)}
-              placeholder="E.g., Hi Super Admin, this is Alex. Please approve my access for the workspace."
+              placeholder="E.g., Hi Super Admin, please approve my workspace access as Admin."
               className="mt-1.5 w-full resize-y rounded-xl border border-[#d8e3dd] bg-[#fcfdfc] p-3 text-[13px] text-[#2e3e39] outline-none focus:border-[#28785b] focus:ring-2 focus:ring-[#28785b]/10"
             />
           </label>
@@ -338,11 +418,16 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
         </form>
 
         <div className="mt-6 flex flex-wrap items-center justify-between gap-2 border-t border-[#edf1ef] pt-4">
-          <Btn kind="outline" onClick={handleCheckStatus} disabled={checking}>
-            <RotateCw size={13} className={checking ? 'animate-spin' : ''} /> {checking ? 'Checking…' : 'Check Approval Status'}
-          </Btn>
-          <Btn kind="ghost" onClick={signOut} className="text-[#a84d41] hover:bg-[#fff2f0]">
-            <LogOut size={13} /> Sign Out
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn kind="outline" onClick={handleCheckStatus} disabled={checking}>
+              <RotateCw size={13} className={checking ? 'animate-spin' : ''} /> {checking ? 'Checking…' : 'Check Approval Status'}
+            </Btn>
+            <Btn kind="ghost" onClick={() => setSuperAdminModalOpen(true)} className="text-[#3b6f56]">
+              <ShieldCheck size={13} /> Super Admin Portal
+            </Btn>
+          </div>
+          <Btn kind="ghost" onClick={handleSignOut} disabled={loggingOut} className="text-[#a84d41] hover:bg-[#fff2f0]">
+            <LogOut size={13} className={loggingOut ? 'animate-spin' : ''} /> {loggingOut ? 'Signing out…' : 'Sign Out'}
           </Btn>
         </div>
       </div>
@@ -391,7 +476,15 @@ const fields: Record<string, Field[]> = {
 };
 
 function Logo({ light = false }: { light?: boolean }) {
-  return <span className={`flex items-center gap-2.5 ${light ? 'text-white' : 'text-slate-800'}`}><img src={`${basePath}/logo.svg`} className="h-8 w-8 rounded-xl" alt="" /><span className="font-display text-[16px] font-extrabold tracking-[-.04em]">speedmatch<span className="text-[#57b987]">.</span></span></span>;
+  return (
+    <span className={`inline-flex items-center gap-2.5 ${light ? 'text-white' : 'text-slate-800'}`}>
+      <img src={`${basePath}/logo.png`} className="h-8 w-8 rounded-xl object-contain shadow-sm" alt="SpeedMatch" />
+      <span className="font-display text-[16px] font-extrabold tracking-[-.04em]">
+        speed<span className="text-[#f26422]">match</span>
+        <span className="ml-1.5 rounded bg-[#f26422]/15 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-[#f26422]">CRM</span>
+      </span>
+    </span>
+  );
 }
 function Btn({ children, onClick, kind = 'primary', disabled = false, className = '', type = 'button' }: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'soft' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; className?: string; type?: 'button' | 'submit' }) {
   const style = { primary: 'bg-[#28785b] text-white hover:bg-[#21664d] shadow-sm', soft: 'bg-[#eaf4ef] text-[#28785b] hover:bg-[#dfefe7]', outline: 'border border-[#dbe4e0] bg-white text-[#3e4c4d] hover:bg-[#f5f8f6]', ghost: 'text-[#657474] hover:bg-[#eff3f1]', danger: 'bg-[#fff0ed] text-[#ad493f] hover:bg-[#ffe5df]' }[kind];
@@ -454,7 +547,9 @@ function Landing() {
   if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
   return <main className="min-h-[100dvh] overflow-hidden bg-[#f8faf8] text-[#24332f]">
     <nav className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-6">
-      <Logo />
+      <Link href="/" aria-label="SpeedMatch home" className="transition hover:opacity-90">
+        <Logo />
+      </Link>
       <div className="flex items-center gap-3">
         <button
           type="button"
@@ -468,13 +563,142 @@ function Landing() {
         </Link>
       </div>
     </nav>
+
     <section className="relative mx-auto grid max-w-[1240px] items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.08fr_.92fr] lg:pb-28 lg:pt-24">
-      <div className="absolute -right-32 top-10 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(183,219,197,.26),transparent_68%)]" />
-      <div className="relative z-10 fade-in"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8e7dc] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#327454]"><span className="h-1.5 w-1.5 rounded-full bg-[#63a981]" /> A clearer way to build relationships</div><h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">Good connections<br />move startups <span className="text-[#34835e]">forward.</span></h1><p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.</p><div className="mt-8 flex flex-wrap items-center gap-3"><Link href="/sign-in" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-5 py-3 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.16)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">Sign in to Workspace <ArrowRight size={16} /></Link></div><div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5"><div className="flex -space-x-2"><Avatar name="Maya Chen" size="sm" /><Avatar name="Owen Brooks" size="sm" /><Avatar name="Lena Ortiz" size="sm" /></div><p className="text-[12px] text-[#74817d]"><strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.</p></div></div>
-      <div className="relative z-10 fade-in lg:translate-y-3"><div className="absolute -inset-5 rounded-[28px] bg-[#e5efe8] blur-2xl" /><div className="relative rounded-[20px] border border-[#e3eae5] bg-white p-4 shadow-[0_24px_70px_rgba(40,70,54,.12)] sm:p-5"><div className="mb-4 flex items-center justify-between"><div className="flex gap-1.5"><i className="h-2 w-2 rounded-full bg-[#e6c17b]" /><i className="h-2 w-2 rounded-full bg-[#91c4a2]" /><i className="h-2 w-2 rounded-full bg-[#d7e0db]" /></div><span className="text-[10px] font-semibold tracking-wide text-[#85928d]">MONDAY, MAY 19</span><Ellipsis size={16} className="text-[#a1aaa5]" /></div><div className="rounded-xl bg-[#f7faf8] p-4"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-[#83918b]">Active relationships</p><p className="mt-1 font-display text-[30px] font-extrabold tracking-[-.055em]">184 partners</p></div><span className="rounded-md bg-[#e8f4ec] px-2 py-1 text-[10px] font-bold text-[#347653]">+18.4%</span></div><div className="mt-4 flex h-[90px] items-end gap-2 border-b border-[#e6ece8] pb-1">{[30, 45, 36, 57, 48, 67, 59, 83, 72, 92, 76, 100, 87, 94].map((v, i) => <span key={i} className="flex-1 rounded-t-sm bg-[#9ac7a8]" style={{ height: `${v}%`, opacity: .45 + (i / 30) }} />)}</div><div className="mt-2 flex justify-between text-[9px] text-[#98a29d]"><span>Mar 01</span><span>Mar 15</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span></div></div><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Next up</span><CalendarDays size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><span className="h-7 w-1 rounded-full bg-[#d7a95b]" /><div><p className="text-[11px] font-bold">Pricing follow-up</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery at Northstar · 2:30 PM</p></div></div></div><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Recent activity</span><ActivityIcon size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><Avatar name="Avery Mason" size="sm" /><div><p className="text-[11px] font-bold">New conversation</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery · 12 minutes ago</p></div></div></div></div><div className="mt-4 flex items-center justify-between rounded-xl bg-[#263b34] px-4 py-3 text-white"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10"><Users size={14} /></span><span className="text-[11px] font-semibold">Good teams stay in sync.</span></div><span className="text-[10px] text-[#b6d1c1]">Your team, one view</span></div></div></div>
+      <div className="absolute -right-32 top-10 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(242,100,34,.12),transparent_68%)]" />
+      <div className="relative z-10 fade-in">
+        <div className="mb-6 inline-flex items-center gap-2.5 rounded-full border border-[#d8e7dc] bg-white px-3.5 py-1.5 text-[12px] font-bold text-[#23583f] shadow-sm">
+          <img src={`${basePath}/logo.png`} className="h-4 w-4 rounded-md object-contain" alt="" />
+          <span>SpeedMatch CRM — Relationship & Pipeline Engine</span>
+        </div>
+        <h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">
+          Good connections<br />move startups <span className="text-[#f26422]">forward.</span>
+        </h1>
+        <p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">
+          Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.
+        </p>
+        <div className="mt-8 flex flex-wrap items-center gap-3">
+          <Link href="/sign-in" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-6 py-3.5 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.18)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">
+            Sign in to Workspace <ArrowRight size={16} />
+          </Link>
+        </div>
+        <div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5">
+          <div className="flex -space-x-2">
+            <Avatar name="Maya Chen" size="sm" />
+            <Avatar name="Owen Brooks" size="sm" />
+            <Avatar name="Lena Ortiz" size="sm" />
+          </div>
+          <p className="text-[12px] text-[#74817d]">
+            <strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.
+          </p>
+        </div>
+      </div>
+
+      <div className="relative z-10 fade-in lg:translate-y-3">
+        <div className="absolute -inset-5 rounded-[28px] bg-[#e5efe8] blur-2xl" />
+        <div className="relative rounded-[20px] border border-[#e3eae5] bg-white p-4 shadow-[0_24px_70px_rgba(40,70,54,.12)] sm:p-5">
+          <div className="mb-4 flex items-center justify-between border-b border-[#f0f3f1] pb-3">
+            <div className="flex items-center gap-2.5">
+              <img src={`${basePath}/logo.png`} className="h-7 w-7 rounded-lg object-contain shadow-sm" alt="" />
+              <div>
+                <p className="text-[12px] font-extrabold tracking-tight text-[#23352f]">SpeedMatch CRM</p>
+                <p className="text-[10px] text-[#85928d]">Workspace Hub</p>
+              </div>
+            </div>
+            <span className="text-[10px] font-semibold tracking-wide text-[#85928d]">LIVE PIPELINE</span>
+          </div>
+          <div className="rounded-xl bg-[#f7faf8] p-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[.12em] text-[#83918b]">Active relationships</p>
+                <p className="mt-1 font-display text-[30px] font-extrabold tracking-[-.055em]">184 partners</p>
+              </div>
+              <span className="rounded-md bg-[#e8f4ec] px-2 py-1 text-[10px] font-bold text-[#347653]">+18.4%</span>
+            </div>
+            <div className="mt-4 flex h-[90px] items-end gap-2 border-b border-[#e6ece8] pb-1">
+              {[30, 45, 36, 57, 48, 67, 59, 83, 72, 92, 76, 100, 87, 94].map((v, i) => (
+                <span key={i} className="flex-1 rounded-t-sm bg-[#9ac7a8]" style={{ height: `${v}%`, opacity: .45 + (i / 30) }} />
+              ))}
+            </div>
+            <div className="mt-2 flex justify-between text-[9px] text-[#98a29d]">
+              <span>Mar 01</span><span>Mar 15</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span>
+            </div>
+          </div>
+          <div className="mt-4 grid grid-cols-2 gap-3">
+            <div className="rounded-xl border border-[#edf0ee] p-3.5">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-[#76837e]">Next up</span>
+                <CalendarDays size={13} className="text-[#83918b]" />
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="h-7 w-1 rounded-full bg-[#f26422]" />
+                <div>
+                  <p className="text-[11px] font-bold">Pricing follow-up</p>
+                  <p className="mt-0.5 text-[9px] text-[#89938f]">Avery at Northstar · 2:30 PM</p>
+                </div>
+              </div>
+            </div>
+            <div className="rounded-xl border border-[#edf0ee] p-3.5">
+              <div className="mb-3 flex items-center justify-between">
+                <span className="text-[10px] font-semibold text-[#76837e]">Recent activity</span>
+                <ActivityIcon size={13} className="text-[#83918b]" />
+              </div>
+              <div className="flex items-center gap-2">
+                <Avatar name="Avery Mason" size="sm" />
+                <div>
+                  <p className="text-[11px] font-bold">New conversation</p>
+                  <p className="mt-0.5 text-[9px] text-[#89938f]">Avery · 12 minutes ago</p>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div className="mt-4 flex items-center justify-between rounded-xl bg-[#1e2c38] px-4 py-3 text-white">
+            <div className="flex items-center gap-2.5">
+              <img src={`${basePath}/logo.png`} className="h-5 w-5 rounded-md object-contain" alt="" />
+              <span className="text-[11px] font-semibold">Good teams stay in sync.</span>
+            </div>
+            <span className="text-[10px] text-[#83b4cf]">Your team, one view</span>
+          </div>
+        </div>
+      </div>
     </section>
-    <section className="border-y border-[#e6ebe7] bg-white/65"><div className="mx-auto grid max-w-[1240px] gap-8 px-6 py-9 md:grid-cols-3"><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#eaf4ee] text-[#347b57]"><ContactRound size={17} /></span><div><p className="text-[13px] font-bold">Relationships, remembered</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Know the person, company, and context behind every opportunity.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f6f0e4] text-[#987a3e]"><Target size={17} /></span><div><p className="text-[13px] font-bold">Momentum, made visible</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">A focused pipeline and timely follow-ups without the CRM overhead.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#edf0f7] text-[#687a9b]"><MessageCircle size={17} /></span><div><p className="text-[13px] font-bold">Your community, together</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Share a win, find an answer, and keep conversations close to work.</p></div></div></div></section>
-    <footer className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-8 text-[11px] text-[#8a9691]"><Logo /><span>Clear relationships make stronger startups.</span></footer>
+
+    <section className="border-y border-[#e6ebe7] bg-white/65">
+      <div className="mx-auto grid max-w-[1240px] gap-8 px-6 py-9 md:grid-cols-3">
+        <div className="flex gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#eaf4ee] text-[#347b57]">
+            <ContactRound size={17} />
+          </span>
+          <div>
+            <p className="text-[13px] font-bold">Relationships, remembered</p>
+            <p className="mt-1 text-[12px] leading-5 text-[#798681]">Know the person, company, and context behind every opportunity.</p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#fff1ec] text-[#d95a32]">
+            <Target size={17} />
+          </span>
+          <div>
+            <p className="text-[13px] font-bold">Momentum, made visible</p>
+            <p className="mt-1 text-[12px] leading-5 text-[#798681]">A focused pipeline and timely follow-ups without the CRM overhead.</p>
+          </div>
+        </div>
+        <div className="flex gap-3">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#edf0f7] text-[#687a9b]">
+            <MessageCircle size={17} />
+          </span>
+          <div>
+            <p className="text-[13px] font-bold">Your community, together</p>
+            <p className="mt-1 text-[12px] leading-5 text-[#798681]">Share a win, find an answer, and keep conversations close to work.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-8 text-[11px] text-[#8a9691]">
+      <Logo />
+      <span>Clear relationships make stronger startups.</span>
+    </footer>
   </main>;
 }
 
@@ -808,6 +1032,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const [loadingComps, setLoadingComps] = useState(true);
     const [pendingRequests, setPendingRequests] = useState<AnyRecord[]>([]);
     const [loadingPending, setLoadingPending] = useState(true);
+    const [allUsers, setAllUsers] = useState<AnyRecord[]>([]);
+    const [loadingUsers, setLoadingUsers] = useState(true);
     const [createOpen, setCreateOpen] = useState(false);
     const [compForm, setCompForm] = useState({
       name: '', adminName: '', adminEmail: '', industry: 'Software', size: '1-10', website: ''
@@ -838,10 +1064,63 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     }, []);
 
+    const loadAllUsers = useCallback(async () => {
+      setLoadingUsers(true);
+      try {
+        const res = await fetch('/api/superadmin/all-users', { credentials: 'include' });
+        if (res.ok) setAllUsers(await res.json());
+      } catch {
+        // silent fallback
+      } finally {
+        setLoadingUsers(false);
+      }
+    }, []);
+
     useEffect(() => {
       void loadCompanies();
       void loadPending();
-    }, [loadCompanies, loadPending]);
+      void loadAllUsers();
+      const interval = setInterval(() => {
+        void loadCompanies();
+        void loadPending();
+        void loadAllUsers();
+      }, 4000);
+      return () => clearInterval(interval);
+    }, [loadCompanies, loadPending, loadAllUsers]);
+
+    const toggleUserRole = async (u: AnyRecord) => {
+      const newRole = u.role === 'admin' ? 'member' : 'admin';
+      try {
+        const res = await fetch(`/api/superadmin/users/${u.id}`, {
+          method: 'PATCH',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ role: newRole }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `${u.name || u.email} role changed to ${newRole === 'admin' ? 'Workspace Admin' : 'Employee'}.` });
+          void loadAllUsers();
+          void loadCompanies();
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to update user role.' });
+      }
+    };
+
+    const deleteUserRecord = async (u: AnyRecord) => {
+      if (!confirm(`Are you sure you want to remove access for "${u.name || u.email}"?`)) return;
+      try {
+        const res = await fetch(`/api/superadmin/users/${u.id}`, { method: 'DELETE', credentials: 'include' });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `User ${u.email} removed.` });
+          void loadAllUsers();
+          void loadCompanies();
+          void loadPending();
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Error removing user.' });
+      }
+    };
 
     const approveUserAsAdmin = async (id: number, email: string) => {
       try {
@@ -852,6 +1131,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           setNotice({ tone: 'good', text: `User ${email} approved as Workspace Admin.` });
           void loadPending();
           void loadCompanies();
+          void loadAllUsers();
         } else {
           setNotice({ tone: 'bad', text: 'Could not approve request.' });
         }
@@ -868,6 +1148,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         if (res.ok) {
           setNotice({ tone: 'good', text: `User ${email} approved as Employee.` });
           void loadPending();
+          void loadCompanies();
+          void loadAllUsers();
         } else {
           setNotice({ tone: 'bad', text: 'Could not approve request.' });
         }
@@ -885,6 +1167,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         if (res.ok) {
           setNotice({ tone: 'good', text: `Access request declined for ${email}.` });
           void loadPending();
+          void loadAllUsers();
         }
       } catch {
         setNotice({ tone: 'bad', text: 'Could not decline request.' });
@@ -906,6 +1189,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           setCreateOpen(false);
           setCompForm({ name: '', adminName: '', adminEmail: '', industry: 'Software', size: '1-10', website: '' });
           void loadCompanies();
+          void loadAllUsers();
         } else {
           const err = await res.json().catch(() => ({}));
           setNotice({ tone: 'bad', text: err?.error || 'Could not create company.' });
@@ -924,6 +1208,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         if (res.ok) {
           setNotice({ tone: 'good', text: `Company "${c.name}" deleted.` });
           void loadCompanies();
+          void loadAllUsers();
         }
       } catch {
         setNotice({ tone: 'bad', text: 'Error deleting company.' });
@@ -931,7 +1216,20 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     };
 
     return <>
-      <PageHeader title="Super Admin Workspace Management" description="Create company workspaces, assign admin access by email, and review user access requests." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company Workspace & Assign Admin</Btn>} />
+      <PageHeader
+        title="Super Admin Workspace Management"
+        description="Create company workspaces, assign admin access by email, and review user access requests."
+        action={
+          <div className="flex flex-wrap items-center gap-2">
+            <Btn kind="outline" onClick={() => { void loadCompanies(); void loadPending(); void loadAllUsers(); }}>
+              <RotateCw size={13} className={loadingUsers || loadingPending || loadingComps ? 'animate-spin' : ''} /> Refresh
+            </Btn>
+            <Btn onClick={() => setCreateOpen(true)}>
+              <Plus size={15} /> Create Company Workspace & Assign Admin
+            </Btn>
+          </div>
+        }
+      />
       {notices}
 
       {/* Unified Card: Create Company Workspace & Assign Admin */}
@@ -1022,6 +1320,75 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
             title="All access requests processed"
             detail="When new unassigned users sign in through Clerk, their account will be blocked and their custom message will appear here for your approval."
           />
+        )}
+      </Card>
+
+      {/* Card 3: All Workspace Users & Access Control Directory */}
+      <Card className="mb-5">
+        <CardTitle
+          title="All Workspace Users & Access Directory"
+          detail="Complete list of all approved Workspace Admins, Employees, and their workspace status"
+          right={<Badge tone={allUsers.length ? 'purple' : 'neutral'}>{allUsers.length} total users</Badge>}
+        />
+        {loadingUsers ? (
+          <LoadingRows />
+        ) : allUsers.length ? (
+          <Table headers={['Member', 'Role', 'Assigned Workspace', 'Access Status', 'Joined', 'Actions']}>
+            {allUsers.map(u => (
+              <tr key={u.id}>
+                <td className="px-5 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <Avatar name={u.name || u.email} />
+                    <div>
+                      <p className="text-[12px] font-bold text-[#273832]">{u.name || u.email}</p>
+                      <p className="font-mono text-[10px] text-[#71817c]">{u.email}</p>
+                    </div>
+                  </div>
+                </td>
+                <td className="px-4 py-3">
+                  <Badge tone={u.role === 'admin' ? 'purple' : 'neutral'}>
+                    {u.role === 'admin' ? 'Workspace Admin' : 'Employee'}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-[12px] font-medium text-[#3b4c46]">
+                  {u.companyName ? (
+                    <span className="flex items-center gap-1.5"><Building2 size={13} className="text-[#3b7e5b]" /> {u.companyName}</span>
+                  ) : (
+                    <span className="text-[#9aa5a1] italic">Unassigned</span>
+                  )}
+                </td>
+                <td className="px-4 py-3">
+                  <Badge tone={u.status === 'active' ? 'green' : u.status === 'rejected' ? 'red' : 'amber'}>
+                    {u.status === 'active' ? 'Active Approved' : u.status === 'rejected' ? 'Rejected' : 'Pending Approval'}
+                  </Badge>
+                </td>
+                <td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(u.joinedAt)}</td>
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-1.5">
+                    {u.status === 'pending' ? (
+                      <>
+                        <Btn kind="primary" onClick={() => approveUserAsAdmin(u.id, u.email)}>
+                          <ShieldCheck size={12} /> Approve Admin
+                        </Btn>
+                        <Btn kind="soft" onClick={() => approveUserAsEmployee(u.id, u.email)}>
+                          <UserCheck size={12} /> Approve Employee
+                        </Btn>
+                      </>
+                    ) : (
+                      <Btn kind="outline" onClick={() => toggleUserRole(u)}>
+                        Switch to {u.role === 'admin' ? 'Employee' : 'Admin'}
+                      </Btn>
+                    )}
+                    <Btn kind="danger" onClick={() => deleteUserRecord(u)}>
+                      <Trash2 size={13} /> Remove
+                    </Btn>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </Table>
+        ) : (
+          <Empty title="No users registered yet" detail="When users sign up via Clerk or are invited by team admins, they will appear in this directory." />
         )}
       </Card>
 
