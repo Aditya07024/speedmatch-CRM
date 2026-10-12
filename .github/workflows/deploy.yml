@@ -54,14 +54,14 @@ jobs:
             git reset --hard origin/main
 
             # Ensure Node, npm, and pnpm environments are loaded
-            [ -s "$HOME/.nvm/nvm.sh" ] && . "$HOME/.nvm/nvm.sh"
-            [ -s "$HOME/.profile" ] && . "$HOME/.profile"
-            [ -s "$HOME/.bashrc" ] && . "$HOME/.bashrc"
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+            if [ -s "$HOME/.profile" ]; then . "$HOME/.profile"; fi
+            if [ -s "$HOME/.bashrc" ]; then . "$HOME/.bashrc"; fi
             export PATH="$PATH:/usr/local/bin:/usr/bin:$HOME/.local/share/pnpm"
 
             # Verify or install pnpm & pm2 if missing
-            command -v pnpm >/dev/null 2>&1 || npm install -g pnpm
-            command -v pm2 >/dev/null 2>&1 || npm install -g pm2
+            if ! command -v pnpm >/dev/null 2>&1; then npm install -g pnpm; fi
+            if ! command -v pm2 >/dev/null 2>&1; then npm install -g pm2; fi
 
             # Install dependencies & build
             pnpm install --no-frozen-lockfile
