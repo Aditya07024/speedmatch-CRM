@@ -1,0 +1,668 @@
+import { createContext, useCallback, useContext, useEffect, useState, type ReactNode } from 'react';
+import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { Route, Switch, Redirect, Router as WouterRouter, Link, useLocation } from 'wouter';
+import {
+  Activity as ActivityIcon, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CalendarDays,
+  Check, CheckCheck, ChevronDown, ChevronRight, CircleDollarSign, Clock3, Compass,
+  ContactRound, Ellipsis, Filter, Inbox, LayoutDashboard, LogOut, MessageCircle, Plus, Search,
+  Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
+  Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText
+} from 'lucide-react';
+import {
+  useGetDashboardSummary, getGetDashboardSummaryQueryKey, useGetDashboardActivity, getGetDashboardActivityQueryKey,
+  useListContacts, getListContactsQueryKey, useCreateContact, useUpdateContact, useDeleteContact,
+  useListCompanies, getListCompaniesQueryKey, useCreateCompany, useUpdateCompany, useDeleteCompany,
+  useListDeals, getListDealsQueryKey, useCreateDeal, useUpdateDeal, useDeleteDeal,
+  useListTasks, getListTasksQueryKey, useCreateTask, useUpdateTask, useDeleteTask,
+  useGetCurrentMember, getGetCurrentMemberQueryKey, useListMembers, getListMembersQueryKey,
+  useListJoinRequests, getListJoinRequestsQueryKey, useApproveJoinRequest, useRejectJoinRequest, useCreateInvitation,
+  useListConversations, getListConversationsQueryKey, useCreateConversation,
+  useListMessages, getListMessagesQueryKey, useCreateMessage,
+  useListCommunityPosts, getListCommunityPostsQueryKey, useCreateCommunityPost, useCreateCommunityComment,
+} from '../../../lib/api-client-react/src/generated/api';
+import NotFound from '@/pages/not-found';
+
+const client = new QueryClient({
+  mutationCache: new MutationCache({
+    onSuccess: () => {
+      void client.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+      void client.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+    },
+  }),
+  defaultOptions: { queries: { staleTime: 20_000, retry: 1, refetchOnWindowFocus: false } },
+});
+const basePath = import.meta.env.BASE_URL.replace(/\/$/, '');
+type AnyRecord = Record<string, any>;
+
+// ---------------------------------------------------------------------------
+// Local authentication (email + password, cookie session handled by the API)
+// ---------------------------------------------------------------------------
+type AuthState = {
+  isLoaded: boolean;
+  member: AnyRecord | null;
+  refresh: () => Promise<void>;
+  signIn: (email: string, password: string) => Promise<void>;
+  signUp: (name: string, email: string, password: string, initiationCode?: string) => Promise<void>;
+  signOut: () => Promise<void>;
+};
+const AuthContext = createContext<AuthState | null>(null);
+function useAuth() {
+  const ctx = useContext(AuthContext);
+  if (!ctx) throw new Error('useAuth must be used inside AuthProvider');
+  return ctx;
+}
+async function authRequest(path: string, body: AnyRecord) {
+  const res = await fetch(`/api/auth/${path}`, {
+    method: 'POST', credentials: 'include',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data?.error || 'Something went wrong. Please try again.');
+  }
+}
+function AuthProvider({ children }: { children: ReactNode }) {
+  const [isLoaded, setLoaded] = useState(false);
+  const [member, setMember] = useState<AnyRecord | null>(null);
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/team/me', { credentials: 'include' });
+      setMember(res.ok ? await res.json() : null);
+    } catch { setMember(null); }
+    setLoaded(true);
+  }, []);
+  useEffect(() => { void refresh(); }, [refresh]);
+  const value: AuthState = {
+    isLoaded, member, refresh,
+    signIn: async (email, password) => { await authRequest('sign-in', { email, password }); client.clear(); await refresh(); },
+    signUp: async (name, email, password, initiationCode) => { await authRequest('sign-up', { name, email, password, initiationCode }); client.clear(); await refresh(); },
+    signOut: async () => { await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' }); client.clear(); setMember(null); },
+  };
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+type Field = { key: string; label: string; type?: string; options?: string[]; required?: boolean; placeholder?: string };
+type Notice = { tone: 'good' | 'bad' | 'info'; text: string } | null;
+
+const navGroups = [
+  { label: 'Workspace', items: [
+    { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+    { label: 'Contacts', href: '/contacts', icon: ContactRound },
+    { label: 'Deals', href: '/deals', icon: CircleDollarSign },
+    { label: 'Tasks', href: '/tasks', icon: ListTodo },
+  ] },
+  { label: 'Connect', items: [
+    { label: 'Inbox', href: '/inbox', icon: Inbox },
+    { label: 'Community', href: '/community', icon: Compass },
+  ] },
+  { label: 'Manage', items: [{ label: 'Team', href: '/team', icon: Users }] },
+];
+const pageNames: Record<string, string> = Object.fromEntries(navGroups.flatMap(g => g.items.map(i => [i.href, i.label])));
+const fields: Record<string, Field[]> = {
+  contacts: [
+    { key: 'name', label: 'Full name', required: true }, { key: 'email', label: 'Email', type: 'email', required: true },
+    { key: 'company', label: 'Company' }, { key: 'role', label: 'Role' }, { key: 'status', label: 'Relationship', options: ['Lead', 'Customer', 'Partner', 'Prospect'] },
+    { key: 'source', label: 'Source' }, { key: 'owner', label: 'Owner' }, { key: 'phone', label: 'Phone' }, { key: 'notes', label: 'Notes', type: 'textarea' },
+  ],
+  companies: [
+    { key: 'name', label: 'Company name', required: true }, { key: 'industry', label: 'Industry' }, { key: 'website', label: 'Website' },
+    { key: 'size', label: 'Team size', options: ['1–10', '11–50', '51–200', '201–500', '500+'] },
+    { key: 'status', label: 'Status', options: ['Prospect', 'Customer', 'Partner', 'Inactive'] }, { key: 'owner', label: 'Owner' },
+  ],
+  deals: [
+    { key: 'name', label: 'Deal name', required: true }, { key: 'company', label: 'Company' }, { key: 'contact', label: 'Primary contact' },
+    { key: 'value', label: 'Deal value', type: 'number', required: true }, { key: 'stage', label: 'Stage', options: ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] },
+    { key: 'probability', label: 'Win probability (%)', type: 'number' }, { key: 'owner', label: 'Owner' }, { key: 'expectedClose', label: 'Expected close', type: 'date' },
+  ],
+  tasks: [
+    { key: 'title', label: 'Task title', required: true }, { key: 'type', label: 'Type', options: ['Call', 'Email', 'Meeting', 'Follow-up', 'Other'] },
+    { key: 'dueDate', label: 'Due date', type: 'date' }, { key: 'status', label: 'Status', options: ['Open', 'In progress', 'Completed'] },
+    { key: 'priority', label: 'Priority', options: ['Low', 'Medium', 'High'] }, { key: 'owner', label: 'Owner' }, { key: 'contact', label: 'Related contact' },
+  ],
+};
+
+function Logo({ light = false }: { light?: boolean }) {
+  return <span className={`flex items-center gap-2.5 ${light ? 'text-white' : 'text-slate-800'}`}><img src={`${basePath}/logo.svg`} className="h-8 w-8 rounded-xl" alt="" /><span className="font-display text-[16px] font-extrabold tracking-[-.04em]">speedmatch<span className="text-[#57b987]">.</span></span></span>;
+}
+function Btn({ children, onClick, kind = 'primary', disabled = false, className = '', type = 'button' }: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'soft' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; className?: string; type?: 'button' | 'submit' }) {
+  const style = { primary: 'bg-[#28785b] text-white hover:bg-[#21664d] shadow-sm', soft: 'bg-[#eaf4ef] text-[#28785b] hover:bg-[#dfefe7]', outline: 'border border-[#dbe4e0] bg-white text-[#3e4c4d] hover:bg-[#f5f8f6]', ghost: 'text-[#657474] hover:bg-[#eff3f1]', danger: 'bg-[#fff0ed] text-[#ad493f] hover:bg-[#ffe5df]' }[kind];
+  return <button data-testid="button-action" type={type} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-55 ${style} ${className}`}>{children}</button>;
+}
+function IconBtn({ icon: Icon, onClick, title }: { icon: any; onClick: () => void; title: string }) {
+  return <button data-testid={`button-${title.toLowerCase().replaceAll(' ', '-')}`} onClick={onClick} title={title} className="rounded-md p-1.5 text-[#75827f] transition hover:bg-[#eef3f0] hover:text-[#28785b]"><Icon size={15} /></button>;
+}
+function Badge({ children, tone = 'neutral' }: { children: ReactNode; tone?: string }) {
+  const colors: Record<string, string> = { green: 'bg-[#eaf4ef] text-[#28785b]', amber: 'bg-[#fff5df] text-[#967124]', red: 'bg-[#fff0ed] text-[#ad493f]', blue: 'bg-[#eaf2f6] text-[#4f7589]', neutral: 'bg-[#f0f3f2] text-[#64716f]', purple: 'bg-[#f1eef8] text-[#746594]' };
+  return <span className={`inline-flex items-center rounded-md px-2 py-1 text-[11px] font-semibold leading-none ${colors[tone] ?? colors.neutral}`}>{children || '—'}</span>;
+}
+function Avatar({ name, size = 'md' }: { name?: string; size?: 'sm' | 'md' | 'lg' }) {
+  const palette = ['bg-[#e9f2ed] text-[#347657]', 'bg-[#f4eee3] text-[#916e32]', 'bg-[#eaf0f5] text-[#4d708b]', 'bg-[#f1eaf0] text-[#855f7a]'];
+  const initials = (name || 'SM').trim().split(/\s+/).map(s => s[0]).join('').slice(0, 2).toUpperCase();
+  const sizes = { sm: 'h-7 w-7 text-[10px]', md: 'h-9 w-9 text-[11px]', lg: 'h-11 w-11 text-[13px]' };
+  return <span className={`inline-flex shrink-0 items-center justify-center rounded-full font-bold ${sizes[size]} ${palette[(name || '').charCodeAt(0) % palette.length]}`}>{initials}</span>;
+}
+function PageHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
+  return <header className="mb-6 flex flex-wrap items-end justify-between gap-4"><div><div className="mb-1.5 text-[11px] font-bold uppercase tracking-[.14em] text-[#87938f]">SpeedMatch / {title}</div><h1 className="font-display text-[27px] font-bold tracking-[-.045em] text-[#26343a]">{title}</h1><p className="mt-1 text-[13px] text-[#74817e]">{description}</p></div>{action}</header>;
+}
+function LoadingRows() { return <div className="space-y-3 p-5">{[0, 1, 2, 3, 4].map(i => <div key={i} className="flex animate-pulse gap-4"><div className="h-8 w-8 rounded-full bg-[#edf1ef]" /><div className="flex-1 space-y-2"><div className="h-3 w-1/3 rounded bg-[#edf1ef]" /><div className="h-2.5 w-1/2 rounded bg-[#f2f4f3]" /></div></div>)}</div>; }
+function NoticeBar({ notice, clear }: { notice: Notice; clear: () => void }) {
+  if (!notice) return null;
+  const color = notice.tone === 'good' ? 'border-[#cae6d5] bg-[#edf8f1] text-[#28684b]' : notice.tone === 'bad' ? 'border-[#f0d0ca] bg-[#fff3f0] text-[#98473d]' : 'border-[#cbdfe5] bg-[#eef7f9] text-[#436c78]';
+  return <div role="status" data-testid="status-feedback" className={`mb-4 flex items-center justify-between rounded-lg border px-3.5 py-2.5 text-[13px] ${color}`}>{notice.text}<button data-testid="button-dismiss-notice" onClick={clear}><X size={15} /></button></div>;
+}
+function Empty({ title, detail, button }: { title: string; detail: string; button?: ReactNode }) {
+  return <div className="flex min-h-52 flex-col items-center justify-center px-6 py-12 text-center"><span className="mb-4 flex h-11 w-11 items-center justify-center rounded-2xl bg-[#edf4f0] text-[#428263]"><Sparkles size={19} /></span><h3 className="text-[14px] font-bold text-[#31413f]">{title}</h3><p className="mt-1 max-w-sm text-[12px] leading-5 text-[#7b8985]">{detail}</p>{button && <div className="mt-4">{button}</div>}</div>;
+}
+function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+  return <section className={`overflow-hidden rounded-xl border border-[#e2e9e5] bg-white shadow-[0_2px_9px_rgba(30,56,45,.025)] ${className}`}>{children}</section>;
+}
+function CardTitle({ title, detail, right }: { title: string; detail?: string; right?: ReactNode }) {
+  return <div className="flex items-center justify-between border-b border-[#edf0ee] px-5 py-4"><div><h2 className="text-[13px] font-bold text-[#31403e]">{title}</h2>{detail && <p className="mt-1 text-[11px] text-[#899490]">{detail}</p>}</div>{right}</div>;
+}
+function Dialog({ title, onClose, children, width = 'max-w-xl' }: { title: string; onClose: () => void; children: ReactNode; width?: string }) {
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-[#15231f]/35 px-4 py-6 backdrop-blur-[2px]" onMouseDown={e => { if (e.currentTarget === e.target) onClose(); }}><div role="dialog" aria-modal="true" className={`fade-in max-h-[90vh] w-full ${width} overflow-y-auto rounded-2xl border border-[#e1e9e4] bg-white shadow-[0_24px_80px_rgba(23,49,39,.2)]`}><div className="sticky top-0 z-10 flex items-center justify-between border-b border-[#edf0ee] bg-white px-5 py-4"><h2 className="font-display text-[17px] font-bold tracking-tight">{title}</h2><IconBtn icon={X} onClick={onClose} title="Close" /></div>{children}</div></div>;
+}
+function FieldInput({ field, value, set }: { field: Field; value: any; set: (value: any) => void }) {
+  const base = 'mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[13px] text-[#344340] outline-none transition focus:border-[#70a88c] focus:ring-2 focus:ring-[#28785b]/10';
+  return <label className="block text-[12px] font-semibold text-[#52605d]">{field.label}{field.required && <span className="ml-1 text-[#bc5c4e]">*</span>}
+    {field.options ? <select required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} className={base}><option value="">Select {field.label.toLowerCase()}</option>{field.options.map(v => <option key={v} value={v}>{v}</option>)}</select> :
+      field.type === 'textarea' ? <textarea required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} rows={3} className={`${base} resize-y`} placeholder={field.placeholder ?? `Add ${field.label.toLowerCase()}`} /> :
+      <input required={field.required} type={field.type ?? 'text'} min={field.type === 'number' ? 0 : undefined} max={field.key === 'probability' ? 100 : undefined} value={value ?? ''} onChange={e => set(field.type === 'number' ? e.target.value : e.target.value)} className={base} placeholder={field.placeholder ?? `Enter ${field.label.toLowerCase()}`} />}
+  </label>;
+}
+function RecordDialog({ entity, initial, onClose, onSave, busy }: { entity: string; initial?: AnyRecord; onClose: () => void; onSave: (data: AnyRecord) => void; busy: boolean }) {
+  const [form, setForm] = useState<AnyRecord>(() => {
+    const raw: AnyRecord = {};
+    for (const f of fields[entity]) raw[f.key] = initial?.[f.key] ?? '';
+    return raw;
+  });
+  const title = `${initial ? 'Edit' : 'Add'} ${entity === 'contacts' ? 'contact' : entity === 'companies' ? 'company' : entity.slice(0, -1)}`;
+  return <Dialog title={title} onClose={onClose}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); const data: AnyRecord = { ...form }; for (const f of fields[entity]) { if (f.type === 'number' && data[f.key] !== '') data[f.key] = Number(data[f.key]); if (!data[f.key]) delete data[f.key]; } onSave(data); }}><div className="grid gap-4 sm:grid-cols-2">{fields[entity].map(field => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><FieldInput field={field} value={form[field.key]} set={value => setForm(old => ({ ...old, [field.key]: value }))} /></div>)}</div><div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4"><Btn kind="outline" onClick={onClose}>Cancel</Btn><Btn type="submit" disabled={busy}>{busy ? 'Saving…' : initial ? 'Save changes' : 'Create record'}</Btn></div></form></Dialog>;
+}
+
+function Landing() {
+  const { member, isLoaded } = useAuth();
+  if (isLoaded && member) return <Redirect to="/dashboard" />;
+  return <main className="min-h-[100dvh] overflow-hidden bg-[#f8faf8] text-[#24332f]">
+    <nav className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-6"><Logo /><div className="flex items-center gap-3"><Link href="/sign-in" data-testid="link-sign-in" className="rounded-lg px-4 py-2 text-[13px] font-semibold text-[#53635e] hover:bg-[#edf2ef]">Sign in</Link><Link href="/sign-up" data-testid="link-request-access" className="rounded-lg bg-[#28785b] px-4 py-2.5 text-[13px] font-semibold text-white shadow-sm hover:bg-[#21664d]">Request access <ArrowRight size={14} className="ml-1 inline" /></Link></div></nav>
+    <section className="relative mx-auto grid max-w-[1240px] items-center gap-14 px-6 pb-20 pt-16 lg:grid-cols-[1.08fr_.92fr] lg:pb-28 lg:pt-24">
+      <div className="absolute -right-32 top-10 h-[520px] w-[520px] rounded-full bg-[radial-gradient(circle,rgba(183,219,197,.26),transparent_68%)]" />
+      <div className="relative z-10 fade-in"><div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[#d8e7dc] bg-white/80 px-3 py-1.5 text-[11px] font-semibold text-[#327454]"><span className="h-1.5 w-1.5 rounded-full bg-[#63a981]" /> A clearer way to build relationships</div><h1 className="font-display max-w-[670px] text-[48px] font-extrabold leading-[1.06] tracking-[-.065em] text-[#25342f] sm:text-[66px]">Good connections<br />move startups <span className="text-[#34835e]">forward.</span></h1><p className="mt-6 max-w-[490px] text-[16px] leading-7 text-[#697873]">Keep customers, deals, follow-ups, and your startup community close. SpeedMatch gives a small team one calm place to keep momentum.</p><div className="mt-8 flex flex-wrap items-center gap-3"><Link href="/sign-up" data-testid="link-get-started" className="inline-flex items-center gap-2 rounded-lg bg-[#28785b] px-5 py-3 text-[14px] font-bold text-white shadow-[0_8px_20px_rgba(40,120,91,.16)] transition hover:-translate-y-0.5 hover:bg-[#21664d]">Get started <ArrowRight size={16} /></Link><span className="text-[12px] text-[#87928e]">Invited by your team? Join in minutes.</span></div><div className="mt-11 flex items-center gap-4 border-t border-[#e5ebe7] pt-5"><div className="flex -space-x-2"><Avatar name="Maya Chen" size="sm" /><Avatar name="Owen Brooks" size="sm" /><Avatar name="Lena Ortiz" size="sm" /></div><p className="text-[12px] text-[#74817d]"><strong className="text-[#3b4a45]">Built for the people doing the work.</strong><br />Small teams. Real relationships. Less busywork.</p></div></div>
+      <div className="relative z-10 fade-in lg:translate-y-3"><div className="absolute -inset-5 rounded-[28px] bg-[#e5efe8] blur-2xl" /><div className="relative rounded-[20px] border border-[#e3eae5] bg-white p-4 shadow-[0_24px_70px_rgba(40,70,54,.12)] sm:p-5"><div className="mb-4 flex items-center justify-between"><div className="flex gap-1.5"><i className="h-2 w-2 rounded-full bg-[#e6c17b]" /><i className="h-2 w-2 rounded-full bg-[#91c4a2]" /><i className="h-2 w-2 rounded-full bg-[#d7e0db]" /></div><span className="text-[10px] font-semibold tracking-wide text-[#85928d]">MONDAY, MAY 19</span><Ellipsis size={16} className="text-[#a1aaa5]" /></div><div className="rounded-xl bg-[#f7faf8] p-4"><div className="flex items-start justify-between"><div><p className="text-[10px] font-bold uppercase tracking-[.12em] text-[#83918b]">Open pipeline</p><p className="mt-1 font-display text-[30px] font-extrabold tracking-[-.055em]">$284,500</p></div><span className="rounded-md bg-[#e8f4ec] px-2 py-1 text-[10px] font-bold text-[#347653]">+18.4%</span></div><div className="mt-4 flex h-[90px] items-end gap-2 border-b border-[#e6ece8] pb-1">{[30, 45, 36, 57, 48, 67, 59, 83, 72, 92, 76, 100, 87, 94].map((v, i) => <span key={i} className="flex-1 rounded-t-sm bg-[#9ac7a8]" style={{ height: `${v}%`, opacity: .45 + (i / 30) }} />)}</div><div className="mt-2 flex justify-between text-[9px] text-[#98a29d]"><span>Mar 01</span><span>Mar 15</span><span>Apr 01</span><span>Apr 15</span><span>May 01</span></div></div><div className="mt-4 grid grid-cols-2 gap-3"><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Next up</span><CalendarDays size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><span className="h-7 w-1 rounded-full bg-[#d7a95b]" /><div><p className="text-[11px] font-bold">Pricing follow-up</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery at Northstar · 2:30 PM</p></div></div></div><div className="rounded-xl border border-[#edf0ee] p-3.5"><div className="mb-3 flex items-center justify-between"><span className="text-[10px] font-semibold text-[#76837e]">Recent activity</span><ActivityIcon size={13} className="text-[#83918b]" /></div><div className="flex items-center gap-2"><Avatar name="Avery Mason" size="sm" /><div><p className="text-[11px] font-bold">New conversation</p><p className="mt-0.5 text-[9px] text-[#89938f]">Avery · 12 minutes ago</p></div></div></div></div><div className="mt-4 flex items-center justify-between rounded-xl bg-[#263b34] px-4 py-3 text-white"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-white/10"><Users size={14} /></span><span className="text-[11px] font-semibold">Good teams stay in sync.</span></div><span className="text-[10px] text-[#b6d1c1]">Your team, one view</span></div></div></div>
+    </section>
+    <section className="border-y border-[#e6ebe7] bg-white/65"><div className="mx-auto grid max-w-[1240px] gap-8 px-6 py-9 md:grid-cols-3"><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#eaf4ee] text-[#347b57]"><ContactRound size={17} /></span><div><p className="text-[13px] font-bold">Relationships, remembered</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Know the person, company, and context behind every opportunity.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#f6f0e4] text-[#987a3e]"><Target size={17} /></span><div><p className="text-[13px] font-bold">Momentum, made visible</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">A focused pipeline and timely follow-ups without the CRM overhead.</p></div></div><div className="flex gap-3"><span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[#edf0f7] text-[#687a9b]"><MessageCircle size={17} /></span><div><p className="text-[13px] font-bold">Your community, together</p><p className="mt-1 text-[12px] leading-5 text-[#798681]">Share a win, find an answer, and keep conversations close to work.</p></div></div></div></section>
+    <footer className="mx-auto flex max-w-[1240px] items-center justify-between px-6 py-8 text-[11px] text-[#8a9691]"><Logo /><span>Clear relationships make stronger startups.</span></footer>
+  </main>;
+}
+
+function AuthForm({ mode }: { mode: 'sign-in' | 'sign-up' }) {
+  const { signIn, signUp, member, isLoaded } = useAuth();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [initiationCode, setInitiationCode] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
+  const up = mode === 'sign-up';
+  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
+  const input = 'mt-1.5 w-full rounded-lg border border-[#dce4e0] bg-[#f8faf9] px-3 py-2.5 text-[14px] text-[#26343a] outline-none focus:border-[#70a88c] focus:ring-2 focus:ring-[#28785b]/10';
+  async function submit(e: React.FormEvent) {
+    e.preventDefault(); setError(''); setBusy(true);
+    try { if (up) await signUp(name, email, password, initiationCode); else await signIn(email, password); }
+    catch (err) { setError(err instanceof Error ? err.message : 'Something went wrong.'); }
+    finally { setBusy(false); }
+  }
+  return <div className="flex min-h-[100dvh] items-center justify-center bg-[radial-gradient(ellipse_at_top,#e5f1e8,transparent_62%),#f5f8f6] px-4 py-10">
+    <div className="absolute left-7 top-7"><Link href="/" aria-label="SpeedMatch home"><Logo /></Link></div>
+    <form onSubmit={submit} className="w-[440px] max-w-full rounded-2xl bg-white p-8 shadow-xl">
+      <h1 className="font-display text-[22px] font-bold text-[#26343a]">{up ? 'Create workspace account' : 'Welcome back'}</h1>
+      <p className="mt-1 text-[13px] text-[#68777b]">{up ? 'Enter your details and admin initiation code to register.' : 'Sign in to pick up where your team left off.'}</p>
+      {error && <div role="alert" className="mt-4 rounded-lg border border-[#f0d0ca] bg-[#fff3f0] px-3.5 py-2.5 text-[13px] text-[#98473d]">{error}</div>}
+      {up && <label className="mt-5 block text-[13px] font-medium text-[#26343a]">Full name<input data-testid="input-name" required value={name} onChange={e => setName(e.target.value)} className={input} autoComplete="name" /></label>}
+      <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Email<input data-testid="input-email" type="email" required value={email} onChange={e => setEmail(e.target.value)} className={input} autoComplete="email" /></label>
+      <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Password<input data-testid="input-password" type="password" required minLength={up ? 8 : undefined} value={password} onChange={e => setPassword(e.target.value)} className={input} autoComplete={up ? 'new-password' : 'current-password'} />{up && <span className="mt-1 block text-[11px] font-normal text-[#68777b]">At least 8 characters.</span>}</label>
+      {up && <label className="mt-4 block text-[13px] font-medium text-[#26343a]">Admin Initiation Code<input data-testid="input-initiation-code" type="text" required placeholder="e.g. SPEEDMATCH2026" value={initiationCode} onChange={e => setInitiationCode(e.target.value)} className={input} /><span className="mt-1 block text-[11px] font-normal text-[#68777b]">Registration requires the initiation code provided by your workspace admin.</span></label>}
+      <button data-testid="button-submit-auth" type="submit" disabled={busy} className="mt-6 w-full rounded-lg bg-[#28785b] px-4 py-2.5 text-[14px] font-semibold text-white hover:bg-[#21674d] disabled:opacity-60">{busy ? 'Please wait…' : up ? 'Create account' : 'Sign in'}</button>
+      <p className="mt-5 text-center text-[13px] text-[#68777b]">{up ? 'Already have an account? ' : 'New here? '}<Link href={up ? '/sign-in' : '/sign-up'} className="font-semibold text-[#28785b]">{up ? 'Sign in' : 'Request access'}</Link></p>
+    </form>
+  </div>;
+}
+function SignInPage() { return <AuthForm mode="sign-in" />; }
+function SignUpPage() { return <AuthForm mode="sign-up" />; }
+
+function AppShell({ path, member, children }: { path: string; member: AnyRecord; children: ReactNode }) {
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const { signOut } = useAuth();
+  const [, setLocation] = useLocation();
+  const name = member?.name || member?.email || 'Team member';
+  const isSuperAdmin = member?.role === 'super_admin';
+  const effectiveNavGroups = isSuperAdmin ? [
+    { label: 'Super Admin', items: [{ label: 'Super Admin', href: '/super-admin', icon: ShieldCheck }] },
+    ...navGroups,
+  ] : navGroups;
+  return <div className="min-h-[100dvh] bg-[#f6f8f7]">
+    {mobileOpen && <button aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-[#15231f]/30 md:hidden" />}
+    <aside className={`fixed inset-y-0 left-0 z-40 flex w-[236px] flex-col bg-[#263934] text-[#d8e4dd] transition-transform duration-200 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+      <div className="flex h-[68px] items-center border-b border-white/10 px-5"><Logo light /></div>
+      <div className="mx-3 mt-5 flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[.055] px-3 py-2.5"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#bddac6] text-[#28513c]"><BriefcaseBusiness size={14} /></span><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-bold text-white">{isSuperAdmin ? 'Super Admin Mode' : 'My workspace'}</p><p className="truncate text-[10px] text-[#a8b9af]">{isSuperAdmin ? 'Platform Management' : 'Startup team'}</p></div><ChevronDown size={13} className="text-[#a8b9af]" /></div>
+      <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3">{effectiveNavGroups.map(group => <div key={group.label}><div className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[.17em] text-[#82968a]">{group.label}</div><div className="space-y-0.5">{group.items.map(({ label, href, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`nav-${label.toLowerCase()}`} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium transition ${path === href ? 'bg-[#e8f2eb] text-[#263d33] shadow-sm' : 'text-[#c0cec5] hover:bg-white/[.075] hover:text-white'}`}><Icon size={16} strokeWidth={1.8} /><span className="flex-1">{label}</span>{label === 'Inbox' && <span className="h-1.5 w-1.5 rounded-full bg-[#84c99b]" />}</Link>)}</div></div>)}</nav>
+      <div className="m-3 rounded-xl border border-white/10 bg-[#30443d] p-3.5"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#405c4e] text-[#b8d8c1]"><Sparkles size={14} /></span><span className="text-[11px] font-bold text-white">Built for momentum</span></div><p className="mt-2 text-[10px] leading-4 text-[#b0c1b7]">Keep the important conversations moving.</p></div>
+      <div className="border-t border-white/10 p-3"><button data-testid="button-account-menu" onClick={() => { void signOut(); }} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-white/[.06]"><Avatar name={name} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-white">{name}</span><span className="block truncate text-[10px] capitalize text-[#9eb0a5]">{member?.role || 'Member'} · Sign out</span></span><LogOut size={14} className="text-[#aabbb0]" /></button></div>
+    </aside>
+    <div className="min-h-[100dvh] md:pl-[236px]">
+      <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>Workspace</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{pageNames[path] || (path === '/super-admin' ? 'Super Admin' : 'Dashboard')}</span></div><div className="relative hidden lg:block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#919d97]" /><input aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div></div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> Synced</span><span aria-label="No new notifications" data-testid="status-notifications" className="relative rounded-lg p-2 text-[#76837e]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#c67c50]" /></span><span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
+      <main className="mx-auto max-w-[1480px] px-4 py-6 md:px-7 md:py-7">{children}</main>
+    </div>
+  </div>;
+}
+
+
+function Metric({ label, value, note, icon: Icon }: { label: string; value: string; note: string; icon: any; change?: string }) {
+  return <Card className="p-4"><div className="flex items-start justify-between"><span className="text-[11px] font-semibold text-[#77847f]">{label}</span><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#edf5f0] text-[#43815f]"><Icon size={16} /></span></div><div className="mt-2 flex items-baseline gap-2"><strong className="font-display text-[25px] font-extrabold tracking-[-.055em] text-[#293a34]">{value}</strong></div><p className="mt-1 text-[10px] text-[#939d99]">{note}</p></Card>;
+}
+function currency(value: any) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(value) || 0); }
+function dateLabel(value: any) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date); }
+function ToneStatus({ value }: { value: any }) {
+  const v = String(value || '—');
+  const tone = /won|customer|approved|complete|active/i.test(v) ? 'green' : /negotiation|pending|progress|qualified|proposal/i.test(v) ? 'amber' : /lost|rejected|overdue|inactive/i.test(v) ? 'red' : /lead|discovery/i.test(v) ? 'blue' : 'neutral';
+  return <Badge tone={tone}>{v}</Badge>;
+}
+function Table({ headers, children, min = 'min-w-[740px]' }: { headers: string[]; children: ReactNode; min?: string }) {
+  return <div className="overflow-x-auto"><table className={`w-full ${min} text-left`}><thead><tr className="border-b border-[#edf0ee] bg-[#fafbfa]">{headers.map(h => <th key={h} className="px-4 py-3 text-[9px] font-bold uppercase tracking-[.1em] text-[#8a9691] first:pl-5 last:pr-5">{h}</th>)}</tr></thead><tbody className="divide-y divide-[#f0f2f1]">{children}</tbody></table></div>;
+}
+
+function Workspace({ path, member }: { path: string; member: AnyRecord }) {
+  const qc = useQueryClient();
+  const [notice, setNotice] = useState<Notice>(null);
+  const [search, setSearch] = useState('');
+  const [filteredOnly, setFilteredOnly] = useState(false);
+  const [modal, setModal] = useState<{ entity: string; row?: AnyRecord } | null>(null);
+  const [activeConversation, setActiveConversation] = useState<number | null>(null);
+  const [messageBody, setMessageBody] = useState('');
+  const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
+  const [postOpen, setPostOpen] = useState(false);
+  const [postForm, setPostForm] = useState({ title: '', body: '', category: 'Founder question' });
+  const [conversationOpen, setConversationOpen] = useState(false);
+  const [conversationForm, setConversationForm] = useState({ name: '', type: 'direct', memberIds: '' });
+  const [feedback, setFeedback] = useState<Notice>(null);
+  const approved = String(member?.status || '').toLowerCase() === 'active';
+  const isAdmin = String(member?.role || '').toLowerCase() === 'admin' || String(member?.role || '').toLowerCase() === 'owner';
+  const queryOpts = <T extends unknown>(key: T, enabled = true, refetchInterval?: number) => ({ query: { enabled: approved && enabled, queryKey: key as any, refetchInterval } });
+
+  const dash = useGetDashboardSummary(queryOpts(getGetDashboardSummaryQueryKey(), path === '/dashboard', 30_000));
+  const activity = useGetDashboardActivity(queryOpts(getGetDashboardActivityQueryKey(), path === '/dashboard', 30_000));
+  const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts'));
+  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), path === '/companies'));
+  const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals'));
+  const tasks = useListTasks(undefined, queryOpts(getListTasksQueryKey(), path === '/tasks' || path === '/dashboard'));
+  const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team'));
+  const requests = useListJoinRequests({ query: { enabled: approved && isAdmin && path === '/team', queryKey: getListJoinRequestsQueryKey() } });
+  const conversations = useListConversations(queryOpts(getListConversationsQueryKey(), path === '/inbox', 10_000));
+  const posts = useListCommunityPosts(queryOpts(getListCommunityPostsQueryKey(), path === '/community', 30_000));
+  const messages = useListMessages(activeConversation as number, { query: { enabled: approved && path === '/inbox' && !!activeConversation, queryKey: getListMessagesQueryKey(activeConversation as number), refetchInterval: 5_000 } });
+
+  const createContact = useCreateContact(); const updateContact = useUpdateContact(); const deleteContact = useDeleteContact();
+  const createCompany = useCreateCompany(); const updateCompany = useUpdateCompany(); const deleteCompany = useDeleteCompany();
+  const createDeal = useCreateDeal(); const updateDeal = useUpdateDeal(); const deleteDeal = useDeleteDeal();
+  const createTask = useCreateTask(); const updateTask = useUpdateTask(); const deleteTask = useDeleteTask();
+  const approveRequest = useApproveJoinRequest(); const rejectRequest = useRejectJoinRequest(); const createInvitation = useCreateInvitation();
+  const createConversation = useCreateConversation(); const createMessage = useCreateMessage();
+  const createPost = useCreateCommunityPost(); const createComment = useCreateCommunityComment();
+  const allPending = [createContact, updateContact, deleteContact, createCompany, updateCompany, deleteCompany, createDeal, updateDeal, deleteDeal, createTask, updateTask, deleteTask, approveRequest, rejectRequest, createInvitation, createConversation, createMessage, createPost, createComment].some(x => x.isPending);
+
+  function invalidate(key: readonly unknown[], text: string, entity?: string) {
+    qc.invalidateQueries({ queryKey: key });
+    qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+    qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+    setNotice({ tone: 'good', text });
+    setModal(null);
+  }
+  const resourceData: Record<string, any> = { contacts: contacts.data, companies: companies.data, deals: deals.data, tasks: tasks.data };
+  const resourceQuery: Record<string, any> = { contacts, companies, deals, tasks };
+  const keys: Record<string, readonly unknown[]> = { contacts: getListContactsQueryKey(), companies: getListCompaniesQueryKey(), deals: getListDealsQueryKey(), tasks: getListTasksQueryKey() };
+  function saveResource(entity: string, data: AnyRecord) {
+    const initial = modal?.row;
+    const done = (name: string) => invalidate(keys[entity], `${name} ${initial ? 'updated' : 'created'} successfully.`, entity);
+    if (entity === 'contacts') {
+      if (initial) updateContact.mutate({ id: initial.id, data }, { onSuccess: () => done('Contact'), onError: () => setNotice({ tone: 'bad', text: 'Contact could not be saved. Check the fields and try again.' }) });
+      else createContact.mutate({ data: data as any }, { onSuccess: () => done('Contact'), onError: () => setNotice({ tone: 'bad', text: 'Contact could not be created. Try again.' }) });
+    } else if (entity === 'companies') {
+      if (initial) updateCompany.mutate({ id: initial.id, data }, { onSuccess: () => done('Company'), onError: () => setNotice({ tone: 'bad', text: 'Company could not be saved. Try again.' }) });
+      else createCompany.mutate({ data: data as any }, { onSuccess: () => done('Company'), onError: () => setNotice({ tone: 'bad', text: 'Company could not be created. Try again.' }) });
+    } else if (entity === 'deals') {
+      if (initial) updateDeal.mutate({ id: initial.id, data }, { onSuccess: () => done('Deal'), onError: () => setNotice({ tone: 'bad', text: 'Deal could not be saved. Try again.' }) });
+      else createDeal.mutate({ data: data as any }, { onSuccess: () => done('Deal'), onError: () => setNotice({ tone: 'bad', text: 'Deal could not be created. Try again.' }) });
+    } else {
+      if (initial) updateTask.mutate({ id: initial.id, data }, { onSuccess: () => done('Task'), onError: () => setNotice({ tone: 'bad', text: 'Task could not be saved. Try again.' }) });
+      else createTask.mutate({ data: data as any }, { onSuccess: () => done('Task'), onError: () => setNotice({ tone: 'bad', text: 'Task could not be created. Try again.' }) });
+    }
+  }
+  function removeResource(entity: string, row: AnyRecord) {
+    if (!window.confirm(`Delete "${row.name || row.title}"? This cannot be undone.`)) return;
+    const onSuccess = () => { qc.invalidateQueries({ queryKey: keys[entity] }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() }); setNotice({ tone: 'good', text: 'Record deleted.' }); };
+    const onError = () => setNotice({ tone: 'bad', text: 'Record could not be deleted. Please try again.' });
+    if (entity === 'contacts') deleteContact.mutate({ id: row.id }, { onSuccess, onError });
+    if (entity === 'companies') deleteCompany.mutate({ id: row.id }, { onSuccess, onError });
+    if (entity === 'deals') deleteDeal.mutate({ id: row.id }, { onSuccess, onError });
+    if (entity === 'tasks') deleteTask.mutate({ id: row.id }, { onSuccess, onError });
+  }
+  const clearFeedback = () => { setNotice(null); setFeedback(null); };
+  const notices = <><NoticeBar notice={notice || feedback} clear={clearFeedback} /></>;
+
+  if (member?.status && !approved) {
+    const rejected = String(member.status).toLowerCase() === 'rejected';
+    return <div className="grid min-h-[100dvh] place-items-center bg-[#f5f8f6] p-5"><Card className="max-w-lg p-8 text-center"><div className={`mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl ${rejected ? 'bg-[#fff0ed] text-[#b94d41]' : 'bg-[#edf4ef] text-[#327653]'}`}>{rejected ? <LockKeyhole size={21} /> : <Clock3 size={21} />}</div><h1 className="font-display text-xl font-bold">{rejected ? 'Access request not approved' : 'Your request is in review'}</h1><p className="mt-2 text-[13px] leading-6 text-[#74817d]">{rejected ? 'Your workspace administrator did not approve this request. Contact your team if you think this is a mistake.' : 'You are signed in, but your workspace membership still needs approval. We’ll let you in as soon as your team reviews the request.'}</p><div className="mt-6 flex justify-center gap-2"><Btn kind="outline" onClick={() => window.location.reload()}><RotateCw size={14} /> Check again</Btn></div></Card></div>;
+  }
+  const qs: any = path === '/dashboard' ? [dash, activity] : path === '/contacts' ? [contacts] : path === '/companies' ? [companies] : path === '/deals' ? [deals] : path === '/tasks' ? [tasks] : path === '/inbox' ? [conversations, ...(activeConversation ? [messages] : [])] : path === '/community' ? [posts] : path === '/team' ? [members, ...(isAdmin ? [requests] : [])] : [];
+  const failed = qs.find((q: any) => q.isError);
+
+  const resourceTitle: Record<string, { title: string; description: string; singular: string }> = {
+    contacts: { title: 'Contacts', description: 'People behind the partnerships, customers, and opportunities.', singular: 'contact' },
+    companies: { title: 'Companies', description: 'Keep every organization and relationship in one clear view.', singular: 'company' },
+    deals: { title: 'Deals', description: 'A focused view of the opportunities moving your business forward.', singular: 'deal' },
+    tasks: { title: 'Tasks', description: 'Follow-ups and next steps, right where your relationships live.', singular: 'task' },
+  };
+  function ResourcePage({ entity }: { entity: string }) {
+    const rows: AnyRecord[] = resourceData[entity] || [];
+    const query = resourceQuery[entity];
+    const q = search.trim().toLowerCase();
+    const filtered = rows.filter(r => (!q || Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))) && (!filteredOnly || !/complete|won|lost|inactive/i.test(String(r.status || ''))));
+    const meta = resourceTitle[entity];
+    const stageOptions = entity === 'deals' ? ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] : entity === 'tasks' ? ['Open', 'In progress', 'Completed'] : [];
+    return <><PageHeader title={meta.title} description={meta.description} action={<Btn onClick={() => setModal({ entity })}><Plus size={15} /> Add {meta.singular}</Btn>} />{notices}<Card><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] px-4 py-3"><div className="relative min-w-[220px] flex-1 sm:max-w-[360px]"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid={`input-search-${entity}`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${entity}…`} className="w-full rounded-lg border border-[#e5ebe7] bg-[#fbfcfb] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#9fc5ac]" /></div><div className="flex items-center gap-2"><Badge>{filtered.length} records</Badge><Btn kind={filteredOnly ? 'soft' : 'ghost'} onClick={() => setFilteredOnly(v => !v)} className="px-2.5"><Filter size={14} /> {filteredOnly ? 'Active only' : 'Filter active'}</Btn></div></div>{query.isLoading ? <LoadingRows /> : query.isError ? <Empty title="Couldn’t load records" detail="The data service is unavailable right now. Retry when your connection is ready." button={<Btn kind="outline" onClick={() => query.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : filtered.length === 0 ? <Empty title={q ? 'No matching records' : `No ${entity} yet`} detail={q ? 'Try a different name or search term.' : `Add your first ${meta.singular} and start building a useful picture of your relationships.`} button={!q && <Btn onClick={() => setModal({ entity })}><Plus size={14} /> Add {meta.singular}</Btn>} /> :
+      <Table headers={entity === 'contacts' ? ['Name', 'Company', 'Relationship', 'Owner', 'Added', ''] : entity === 'companies' ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', ''] : entity === 'deals' ? ['Opportunity', 'Company', 'Stage', 'Value', 'Close date', 'Owner', ''] : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']}>
+        {filtered.map(r => <tr key={r.id} data-testid={`row-${entity}-${r.id}`} className="group transition hover:bg-[#fafcfb]">
+          {entity === 'contacts' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={r.name} size="sm" /><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.email || r.role || '—'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.createdAt)}</td></>}
+          {entity === 'companies' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0f3f1] text-[#62716b]"><Building2 size={15} /></span><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.website || 'No website'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.industry || '—'}</td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.size || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
+          {entity === 'deals' && <><td className="px-5 py-3"><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No contact'}</p></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><select aria-label={`Change ${r.name} stage`} data-testid={`select-stage-${r.id}`} value={r.stage || 'Discovery'} onChange={e => updateDeal.mutate({ id: r.id, data: { stage: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListDealsQueryKey() }); setNotice({ tone: 'good', text: 'Deal stage updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update deal stage.' }) })} className="rounded-md border-0 bg-transparent p-0 text-[11px] outline-none"><option>{r.stage}</option>{stageOptions.filter(x => x !== r.stage).map(x => <option key={x}>{x}</option>)}</select></td><td className="px-4 py-3 font-mono text-[12px] font-bold text-[#364640]">{currency(r.value)}</td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.expectedClose)}</td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
+          {entity === 'tasks' && <><td className="px-5 py-3"><p className={`text-[12px] font-semibold ${/complete/i.test(r.status) ? 'text-[#9aa49f] line-through' : 'text-[#33413d]'}`}>{r.title}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No linked contact'}</p></td><td className="px-4 py-3 text-[11px] text-[#64716d]">{r.type || '—'}</td><td className="px-4 py-3 text-[11px] text-[#64716d]">{dateLabel(r.dueDate)}</td><td className="px-4 py-3"><Badge tone={r.priority === 'High' ? 'red' : r.priority === 'Medium' ? 'amber' : 'neutral'}>{r.priority || 'Normal'}</Badge></td><td className="px-4 py-3"><select aria-label={`Change ${r.title} status`} data-testid={`select-task-status-${r.id}`} value={r.status || 'Open'} onChange={e => updateTask.mutate({ id: r.id, data: { status: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); setNotice({ tone: 'good', text: 'Task status updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task status.' }) })} className="rounded-md border-0 bg-transparent p-0 text-[11px] outline-none">{['Open', 'In progress', 'Completed'].map(v => <option key={v}>{v}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
+          <td className="px-3 py-3"><div className="flex justify-end gap-1 opacity-60 transition group-hover:opacity-100"><IconBtn icon={Pencil} onClick={() => setModal({ entity, row: r })} title="Edit record" /><IconBtn icon={Trash2} onClick={() => removeResource(entity, r)} title="Delete record" /></div></td>
+        </tr>)}
+      </Table>}</Card>{modal?.entity === entity && <RecordDialog entity={entity} initial={modal.row} onClose={() => setModal(null)} onSave={data => saveResource(entity, data)} busy={allPending} />}</>;
+  }
+
+  function Dashboard() {
+    const d: any = dash.data; const a: AnyRecord[] = (activity.data as AnyRecord[]) || [];
+    const topTasks = ((tasks.data as AnyRecord[]) || []).slice(0, 4);
+    return <><PageHeader title={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${(member.name || '').split(' ')[0] || 'there'}`} description="Here’s what’s happening across your relationships today." action={<Btn onClick={() => setModal({ entity: 'deals' })}><Plus size={15} /> New deal</Btn>} />{notices}
+      {dash.isLoading ? <div className="grid gap-3 sm:grid-cols-3">{[1,2,3].map(i => <div key={i} className="h-28 animate-pulse rounded-xl bg-white" />)}</div> : dash.isError ? <Card><Empty title="Dashboard is taking a pause" detail="We couldn’t load your workspace summary." button={<Btn kind="outline" onClick={() => dash.refetch()}><RotateCw size={14} /> Retry</Btn>} /></Card> : <div className="grid gap-3 sm:grid-cols-3"><Metric label="Active opportunities" value={String(d?.openDeals ?? 0)} note="Deals currently in progress" icon={BriefcaseBusiness} /><Metric label="Contacts" value={String(d?.contacts ?? 0)} note="People in your network" icon={ContactRound} /><Metric label="Follow-ups due" value={String(d?.tasksDue ?? 0)} note={`${d?.pendingJoinees ?? 0} team requests to review`} icon={CalendarDays} /></div>}
+      <div className="mt-5 grid gap-4 xl:grid-cols-2">
+        <Card>
+          <CardTitle title="Pipeline by stage" detail="Opportunities by current stage" right={<Link href="/deals" className="text-[11px] font-semibold text-[#43815f]">View deals <ArrowRight size={12} className="inline" /></Link>} />
+          {d?.stageBreakdown?.length ? <div className="space-y-4 p-5">{d.stageBreakdown.map((s: AnyRecord, i: number) => <div key={s.stage}><div className="mb-1.5 flex items-center justify-between"><span className="text-[11px] font-semibold text-[#53615c]">{s.stage}</span><span className="font-mono text-[10px] text-[#89948f]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#eff2f0]"><div className="h-full rounded-full bg-[#599570]" style={{ width: `${Math.max(4, Math.min(100, s.count / Math.max(...d.stageBreakdown.map((x: AnyRecord) => x.count), 1) * 100))}%`, opacity: 1 - i * .09 }} /></div></div>)}</div> : <Empty title="No active pipeline" detail="Create an opportunity to see momentum by stage." button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>} />}
+        </Card>
+        <Card>
+          <CardTitle title="Today’s follow-ups" detail="Make the next conversation count" right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks <ArrowRight size={12} className="inline" /></Link>} />
+          {tasks.isLoading ? <LoadingRows /> : topTasks.length ? <div className="divide-y divide-[#f0f2f1]">{topTasks.map(t => <div key={t.id} className="flex items-center gap-3 px-5 py-3"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#f5f2e9] text-[#9b8146]"><Check size={14} /></span><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-[#46534e]">{t.title}</p><p className="mt-0.5 text-[10px] text-[#89948f]">{t.contact || t.type || 'Follow-up'} · {dateLabel(t.dueDate)}</p></div><ToneStatus value={t.status} /></div>)}</div> : <Empty title="Nothing on the list yet" detail="Add a follow-up so no relationship goes quiet." button={<Btn kind="soft" onClick={() => setModal({ entity: 'tasks' })}><Plus size={13} /> Add task</Btn>} />}
+        </Card>
+      </div>
+      <Card className="mt-4">
+        <CardTitle title="Recent activity" detail="The latest movement from your team" right={<ActivityIcon size={15} className="text-[#87938e]" />} />
+        {activity.isLoading ? <LoadingRows /> : a.length ? <div className="divide-y divide-[#f0f2f1]">{a.slice(0, 6).map((item, i) => <div key={item.id} data-testid={`activity-${item.id}`} className="flex items-center gap-3 px-5 py-3.5"><Avatar name={item.kind || item.title} size="sm" /><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-[#47554f]">{item.title}</p><p className="mt-0.5 truncate text-[10px] text-[#87928e]">{item.detail}</p></div><span className="whitespace-nowrap text-[9px] text-[#98a29e]">{dateLabel(item.createdAt)}</span></div>)}</div> : <Empty title="A fresh start" detail="Team updates, new records, and deal movement will show here." />}
+      </Card>
+    </>;
+  }
+  function Team() {
+    const team: AnyRecord[] = members.data || []; const joins: AnyRecord[] = ((requests.data || []) as AnyRecord[]).map(j => ({ ...j, createdAt: j.joinedAt }));
+    const [initiationCodeInput, setInitiationCodeInput] = useState('');
+    const [updatingCode, setUpdatingCode] = useState(false);
+
+    useEffect(() => {
+      if (isAdmin) {
+        fetch('/api/team/initiation-code', { credentials: 'include' })
+          .then(res => res.json())
+          .then(data => { if (data?.initiationCode) setInitiationCodeInput(data.initiationCode); })
+          .catch(() => {});
+      }
+    }, [isAdmin]);
+
+    const saveInitiationCode = async () => {
+      if (!initiationCodeInput.trim()) return;
+      setUpdatingCode(true);
+      try {
+        const res = await fetch('/api/team/initiation-code', {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initiationCode: initiationCodeInput.trim() }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: 'Workspace initiation code updated successfully.' });
+        } else {
+          const errData = await res.json().catch(() => ({}));
+          setNotice({ tone: 'bad', text: errData?.error || 'Could not update initiation code.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to update initiation code.' });
+      } finally {
+        setUpdatingCode(false);
+      }
+    };
+
+    return <><PageHeader title="Team" description="Bring your people in and keep workspace access in good order." action={isAdmin ? <Btn onClick={() => document.getElementById('invite-email')?.focus()}><UserPlus size={15} /> Invite teammate</Btn> : null} />{notices}
+      {isAdmin && <Card className="mb-4"><CardTitle title="Workspace Initiation Code" detail="Required for new members to complete registration" right={<LockKeyhole size={15} className="text-[#43815f]" />} /><div className="p-4"><p className="mb-3 text-[12px] text-[#63736e]">New team members must enter this initiation code during registration to join your workspace.</p><div className="flex flex-wrap items-center gap-2"><input data-testid="input-workspace-initiation-code" type="text" value={initiationCodeInput} onChange={e => setInitiationCodeInput(e.target.value)} className="w-64 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] font-mono font-semibold text-[#25342f] outline-none focus:border-[#70a88c]" /><Btn onClick={saveInitiationCode} disabled={updatingCode}><Check size={14} />{updatingCode ? 'Saving…' : 'Save Code'}</Btn><Btn kind="outline" onClick={() => { navigator.clipboard.writeText(initiationCodeInput); setNotice({ tone: 'good', text: 'Initiation code copied to clipboard!' }); }}>Copy Code</Btn></div></div></Card>}
+      {isAdmin && <Card className="mb-4"><CardTitle title="Invite a teammate" detail="Add their email here, then ask them to sign up with it. They’ll be approved automatically." right={<Mail size={15} className="text-[#84918b]" />} /><form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={e => { e.preventDefault(); createInvitation.mutate({ data: { email: inviteEmail, role: inviteRole } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); setInviteEmail(''); setFeedback({ tone: 'good', text: `${inviteEmail} is invited. Ask them to sign up with this email address to join automatically.` }); }, onError: () => setFeedback({ tone: 'bad', text: 'Invitation could not be saved. Check the email and try again.' }) }); }}><input id="invite-email" data-testid="input-invite-email" required type="email" placeholder="teammate@company.com" value={inviteEmail} onChange={e => setInviteEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" /><select aria-label="Invitation role" data-testid="select-invitation-role" value={inviteRole} onChange={e => setInviteRole(e.target.value as 'member' | 'admin')} className="rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px]"><option value="member">Member</option><option value="admin">Admin</option></select><Btn type="submit" disabled={createInvitation.isPending}><Send size={14} />{createInvitation.isPending ? 'Sending…' : 'Send invitation'}</Btn></form></Card>}
+      <Card className="mb-4"><CardTitle title="Team members" detail={`${team.length} approved members`} right={<ShieldCheck size={15} className="text-[#43815f]" />} />{members.isLoading ? <LoadingRows /> : members.isError ? <Empty title="Couldn’t load the team" detail="Refresh to check approved workspace members." button={<Btn kind="outline" onClick={() => members.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : team.length ? <Table headers={['Member', 'Role', 'Status', 'Joined']} min="min-w-[580px]">{team.map(m => <tr key={m.id} data-testid={`member-${m.id}`}><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={m.name} /><div><p className="text-[12px] font-semibold text-[#35433e]">{m.name}</p><p className="text-[10px] text-[#87938e]">{m.email} · Member ID {m.id}</p></div></div></td><td className="px-4 py-3"><Badge tone={m.role === 'admin' || m.role === 'super_admin' || m.role === 'owner' ? 'purple' : 'neutral'}>{m.role}</Badge></td><td className="px-4 py-3"><ToneStatus value={m.status} /></td><td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(m.joinedAt)}</td></tr>)}</Table> : <Empty title="It starts with your team" detail="The first approved member becomes the workspace owner. Invite teammates when you’re ready." />}</Card>
+      {isAdmin && <Card><CardTitle title="Join requests" detail="Review new people asking to join this workspace" right={<Badge tone={joins.length ? 'amber' : 'neutral'}>{joins.length} pending</Badge>} />{requests.isLoading ? <LoadingRows /> : requests.isError ? <Empty title="Join requests unavailable" detail="Could not load pending access requests." button={<Btn kind="outline" onClick={() => requests.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : joins.length ? <div className="divide-y divide-[#f0f2f1]">{joins.map(j => <div key={j.id} className="flex flex-wrap items-center gap-3 px-5 py-3.5"><Avatar name={j.name || j.email} /><div className="min-w-[160px] flex-1"><p className="text-[12px] font-semibold">{j.name || j.email}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{j.email} · Requested {dateLabel(j.createdAt)}</p></div><Badge tone="amber">Pending review</Badge><Btn kind="soft" disabled={approveRequest.isPending} onClick={() => approveRequest.mutate({ id: j.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); qc.invalidateQueries({ queryKey: getListMembersQueryKey() }); setNotice({ tone: 'good', text: `${j.name || j.email} is now a team member.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not approve this request.' }) })}><CheckCheck size={14} /> Approve</Btn><Btn kind="danger" disabled={rejectRequest.isPending} onClick={() => rejectRequest.mutate({ id: j.id }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListJoinRequestsQueryKey() }); setNotice({ tone: 'good', text: 'Join request declined.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not decline this request.' }) })}><X size={14} /> Decline</Btn></div>)}</div> : <Empty title="You’re all caught up" detail="New membership requests will appear here for review." />}</Card>}
+    </>;
+  }
+  function InboxPage() {
+    const convs: AnyRecord[] = conversations.data || [];
+    return <><PageHeader title="Inbox" description="Direct messages and group conversations, all in one place." action={<Btn onClick={() => setConversationOpen(true)}><Plus size={15} /> New conversation</Btn>} />{notices}<Card className="grid min-h-[590px] overflow-hidden md:grid-cols-[290px_1fr]"><div className="border-r border-[#edf0ee]"><div className="border-b border-[#edf0ee] p-4"><div className="relative"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid="input-search-conversations" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find a conversation" className="w-full rounded-lg border border-[#e4eae6] bg-[#fafbfa] py-2 pl-8 pr-2 text-[11px] outline-none" /></div></div>{conversations.isLoading ? <LoadingRows /> : conversations.isError ? <Empty title="Inbox unavailable" detail="We couldn’t load your conversations." button={<Btn kind="outline" onClick={() => conversations.refetch()}><RotateCw size={13} /> Retry</Btn>} /> : convs.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length ? convs.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => <button key={c.id} data-testid={`conversation-${c.id}`} onClick={() => setActiveConversation(c.id)} className={`flex w-full items-start gap-3 border-b border-[#f0f2f1] px-4 py-3.5 text-left transition hover:bg-[#fafcfb] ${activeConversation === c.id ? 'bg-[#f0f6f2]' : ''}`}><Avatar name={c.name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="truncate text-[11px] text-[#394841]">{c.name}</strong><span className="text-[9px] text-[#9aa49f]">{dateLabel(c.updatedAt)}</span></span><span className="mt-1 block truncate text-[10px] text-[#89948f]">{c.lastMessage || 'Start the conversation'}</span><span className="mt-1 block text-[9px] capitalize text-[#a0aaa5]">{c.type} · {(c.memberNames || []).join(', ')}</span></span>{c.unreadCount > 0 && <span className="mt-1 h-2 w-2 rounded-full bg-[#43845f]" />}</button>) : <Empty title="No conversations yet" detail="Start a direct or group chat with your team." button={<Btn onClick={() => setConversationOpen(true)}><Plus size={13} /> Start a conversation</Btn>} />}</div>
+        <div className="flex min-h-[500px] flex-col bg-[#fcfdfc]">{activeConversation ? <><div className="flex items-center gap-3 border-b border-[#edf0ee] bg-white px-5 py-3.5"><Avatar name={convs.find(c => c.id === activeConversation)?.name} size="sm" /><div><p className="text-[12px] font-bold">{convs.find(c => c.id === activeConversation)?.name}</p><p className="text-[10px] text-[#87938e]">{(convs.find(c => c.id === activeConversation)?.memberNames || []).join(' · ')}</p></div></div><div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.isLoading ? <LoadingRows /> : messages.isError ? <Empty title="Messages could not load" detail="Try again to retrieve your conversation history." button={<Btn kind="outline" onClick={() => messages.refetch()}><RotateCw size={13} /> Retry</Btn>} /> : (messages.data as AnyRecord[] || []).length ? (messages.data as AnyRecord[]).map(m => <div key={m.id} data-testid={`message-${m.id}`} className={`flex gap-2.5 ${m.senderId === member.id ? 'flex-row-reverse' : ''}`}><Avatar name={m.senderName} size="sm" /><div className={`max-w-[75%] rounded-xl px-3.5 py-2.5 ${m.senderId === member.id ? 'bg-[#e8f2eb] text-[#31473a]' : 'border border-[#e8eeea] bg-white text-[#4e5b56]'}`}><p className="mb-1 text-[9px] font-bold text-[#75827d]">{m.senderName}</p><p className="whitespace-pre-wrap text-[12px] leading-5">{m.body}</p><p className="mt-1 text-right text-[9px] text-[#98a39e]">{new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(m.createdAt))}</p></div></div>) : <Empty title="Start with a hello" detail="Your team's conversation history will collect here." />}</div><form className="flex items-end gap-2 border-t border-[#edf0ee] bg-white p-3" onSubmit={e => { e.preventDefault(); if (!messageBody.trim() || !activeConversation) return; createMessage.mutate({ id: activeConversation, data: { body: messageBody.trim() } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListMessagesQueryKey(activeConversation) }); qc.invalidateQueries({ queryKey: getListConversationsQueryKey() }); setMessageBody(''); setNotice({ tone: 'good', text: 'Message sent.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Message could not be sent. Try again.' }) }); }}><textarea data-testid="input-message-body" value={messageBody} onChange={e => setMessageBody(e.target.value)} rows={1} placeholder="Write a message…" className="max-h-28 min-h-10 flex-1 resize-y rounded-lg border border-[#e2e9e5] bg-[#fafbfa] px-3 py-2.5 text-[12px] outline-none focus:border-[#9fc5ac]" /><Btn type="submit" disabled={!messageBody.trim() || createMessage.isPending} className="h-10 w-10 px-0"><Send size={15} /></Btn></form></> : <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#edf4f0] text-[#428263]"><MessageCircle size={20} /></span><h3 className="mt-4 text-[14px] font-bold text-[#35443e]">Your team, in the loop</h3><p className="mt-1 max-w-xs text-[11px] leading-5 text-[#85918c]">Pick a conversation to catch up, or start a new one with your teammates.</p><Btn className="mt-4" onClick={() => setConversationOpen(true)}><Plus size={13} /> New conversation</Btn></div>}</div>
+      </Card>{conversationOpen && <Dialog title="New conversation" onClose={() => setConversationOpen(false)}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); const ids = conversationForm.memberIds.split(',').map(x => Number(x.trim())).filter(Boolean); createConversation.mutate({ data: { name: conversationForm.name, type: conversationForm.type as any, memberIds: ids } }, { onSuccess: (c: any) => { qc.invalidateQueries({ queryKey: getListConversationsQueryKey() }); setConversationOpen(false); setActiveConversation(c.id); setNotice({ tone: 'good', text: 'Conversation created.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Conversation could not be created.' }) }); }}><FieldInput field={{ key: 'name', label: 'Conversation name', required: true }} value={conversationForm.name} set={v => setConversationForm({ ...conversationForm, name: v })} /><FieldInput field={{ key: 'type', label: 'Type', options: ['direct', 'group'] }} value={conversationForm.type} set={v => setConversationForm({ ...conversationForm, type: v })} /><label className="block text-[12px] font-semibold text-[#52605d]">Member IDs <span className="font-normal text-[#87938e]">(comma-separated)</span><input data-testid="input-conversation-members" required value={conversationForm.memberIds} onChange={e => setConversationForm({ ...conversationForm, memberIds: e.target.value })} className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] font-normal outline-none focus:border-[#70a88c]" placeholder="e.g. 2, 4" /></label><p className="text-[10px] text-[#87938e]">Find member IDs in the Team view. No passwords are shared in chat or invitations.</p><div className="flex justify-end gap-2 pt-2"><Btn kind="outline" onClick={() => setConversationOpen(false)}>Cancel</Btn><Btn type="submit" disabled={createConversation.isPending}>{createConversation.isPending ? 'Creating…' : 'Create conversation'}</Btn></div></form></Dialog>}</>;
+  }
+  function Community() {
+    const list: AnyRecord[] = posts.data || [];
+    return <><PageHeader title="Community" description="Trade hard-won lessons with the people building alongside you." action={<Btn onClick={() => setPostOpen(true)}><Plus size={15} /> Start a conversation</Btn>} />{notices}<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-3">{posts.isLoading ? <Card><LoadingRows /></Card> : posts.isError ? <Card><Empty title="Community feed unavailable" detail="We couldn’t load the latest conversations." button={<Btn kind="outline" onClick={() => posts.refetch()}><RotateCw size={13} /> Retry</Btn>} /></Card> : list.length ? list.map(p => <Card key={p.id} data-testid={`post-${p.id}`}><div className="p-5"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2.5"><Avatar name={p.author} /><div><p className="text-[12px] font-bold text-[#3c4b45]">{p.author}</p><p className="mt-0.5 text-[10px] text-[#8a9691]">{dateLabel(p.createdAt)}</p></div></div><Badge tone="blue">{p.category || 'Community'}</Badge></div><h2 className="mt-4 font-display text-[16px] font-bold tracking-tight text-[#34423d]">{p.title}</h2><p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#687671]">{p.body}</p><div className="mt-4 flex items-center gap-4 border-t border-[#eef1ef] pt-3"><span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]"><TrendingUp size={13} /> {p.likes || 0} people found this useful</span><span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]"><MessageSquareText size={13} /> {p.comments?.length || 0} replies</span></div>{p.comments?.length > 0 && <div className="mt-2 space-y-2 border-l-2 border-[#e6eee8] pl-3">{p.comments.map((c: AnyRecord) => <div key={c.id} className="rounded-lg bg-[#f8faf8] px-3 py-2"><span className="text-[10px] font-bold text-[#53635c]">{c.author}</span><span className="ml-2 text-[9px] text-[#9aa49f]">{dateLabel(c.createdAt)}</span><p className="mt-1 text-[11px] leading-5 text-[#6c7973]">{c.body}</p></div>)}</div>}<form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); const body = commentDraft[p.id]?.trim(); if (!body) return; createComment.mutate({ id: p.id, data: { body } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() }); setCommentDraft(old => ({ ...old, [p.id]: '' })); setNotice({ tone: 'good', text: 'Reply added to the conversation.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Your reply could not be posted. Try again.' }) }); }}><input data-testid={`input-comment-${p.id}`} value={commentDraft[p.id] || ''} onChange={e => setCommentDraft(old => ({ ...old, [p.id]: e.target.value }))} placeholder="Add a thoughtful reply…" className="min-w-0 flex-1 rounded-lg border border-[#e4eae6] bg-[#fafbfa] px-3 py-2 text-[11px] outline-none focus:border-[#9fc5ac]" /><Btn type="submit" kind="soft" disabled={!commentDraft[p.id]?.trim() || createComment.isPending}><Send size={13} /> Reply</Btn></form></div></Card>) : <Card><Empty title="A good community starts with a question" detail="Share a founder challenge, a useful lesson, or a win worth passing on." button={<Btn onClick={() => setPostOpen(true)}><Plus size={14} /> Write the first post</Btn>} /></Card>}</div>
+        <aside className="space-y-3"><Card><div className="p-5"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#edf4ef] text-[#43815f]"><Globe2 size={17} /></div><h3 className="mt-3 text-[13px] font-bold">A room for builders</h3><p className="mt-1 text-[11px] leading-5 text-[#7c8983]">Ask openly, give context, and share the playbook you wish you had sooner.</p><Btn kind="soft" className="mt-4 w-full" onClick={() => setPostOpen(true)}><Plus size={13} /> Start a post</Btn></div></Card><Card><CardTitle title="Good community habits" /><div className="space-y-3 p-4"><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Include context so answers can be useful.</p><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Give feedback generously and specifically.</p><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Share what worked, not just what should.</p></div></Card></aside></div>
+      {postOpen && <Dialog title="Start a conversation" onClose={() => setPostOpen(false)}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); createPost.mutate({ data: postForm }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() }); setPostOpen(false); setPostForm({ title: '', body: '', category: 'Founder question' }); setNotice({ tone: 'good', text: 'Your post is live in the community.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Post could not be published. Check the details and try again.' }) }); }}><FieldInput field={{ key: 'title', label: 'Title', required: true }} value={postForm.title} set={v => setPostForm({ ...postForm, title: v })} /><FieldInput field={{ key: 'category', label: 'Topic', options: ['Founder question', 'Go-to-market', 'Hiring', 'Product', 'Milestone'] }} value={postForm.category} set={v => setPostForm({ ...postForm, category: v })} /><FieldInput field={{ key: 'body', label: 'What’s on your mind?', type: 'textarea', required: true }} value={postForm.body} set={v => setPostForm({ ...postForm, body: v })} /><div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4"><Btn kind="outline" onClick={() => setPostOpen(false)}>Cancel</Btn><Btn type="submit" disabled={createPost.isPending}><Send size={14} /> {createPost.isPending ? 'Publishing…' : 'Publish post'}</Btn></div></form></Dialog>}</>;
+  }
+
+  function SuperAdminPage() {
+    const [companiesList, setCompaniesList] = useState<AnyRecord[]>([]);
+    const [loadingComps, setLoadingComps] = useState(true);
+    const [createOpen, setCreateOpen] = useState(false);
+    const [compForm, setCompForm] = useState({
+      name: '', adminName: '', adminEmail: '', adminPassword: '', initiationCode: 'SPEEDMATCH2026', industry: 'Software', size: '1-10', website: ''
+    });
+    const [savingComp, setSavingComp] = useState(false);
+    const [resetTarget, setResetTarget] = useState<AnyRecord | null>(null);
+    const [passInput, setPassInput] = useState('');
+    const [resettingPass, setResettingPass] = useState(false);
+
+    const loadCompanies = useCallback(async () => {
+      setLoadingComps(true);
+      try {
+        const res = await fetch('/api/superadmin/companies', { credentials: 'include' });
+        if (res.ok) setCompaniesList(await res.json());
+      } catch {
+        setNotice({ tone: 'bad', text: 'Could not load companies list.' });
+      } finally {
+        setLoadingComps(false);
+      }
+    }, []);
+
+    useEffect(() => { void loadCompanies(); }, [loadCompanies]);
+
+    const submitCreateCompany = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setSavingComp(true);
+      try {
+        const res = await fetch('/api/superadmin/companies', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(compForm),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Company "${compForm.name}" created with Admin "${compForm.adminEmail}"` });
+          setCreateOpen(false);
+          setCompForm({ name: '', adminName: '', adminEmail: '', adminPassword: '', initiationCode: 'SPEEDMATCH2026', industry: 'Software', size: '1-10', website: '' });
+          void loadCompanies();
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setNotice({ tone: 'bad', text: err?.error || 'Could not create company.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to create company.' });
+      } finally {
+        setSavingComp(false);
+      }
+    };
+
+    const submitResetPassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!resetTarget) return;
+      setResettingPass(true);
+      try {
+        const res = await fetch(`/api/superadmin/companies/${resetTarget.id}/reset-admin-password`, {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ newPassword: passInput }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Admin password updated for ${resetTarget.name}` });
+          setResetTarget(null);
+          setPassInput('');
+        } else {
+          const err = await res.json().catch(() => ({}));
+          setNotice({ tone: 'bad', text: err?.error || 'Could not reset password.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to reset password.' });
+      } finally {
+        setResettingPass(false);
+      }
+    };
+
+    const deleteCompanyItem = async (c: AnyRecord) => {
+      if (!confirm(`Are you sure you want to delete "${c.name}"? This removes all company users.`)) return;
+      try {
+        const res = await fetch(`/api/superadmin/companies/${c.id}`, { method: 'DELETE', credentials: 'include' });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Company "${c.name}" deleted.` });
+          void loadCompanies();
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Error deleting company.' });
+      }
+    };
+
+    const editInitiationCodeItem = async (c: AnyRecord) => {
+      const newCode = prompt(`Enter new initiation code for ${c.name}:`, c.initiationCode);
+      if (!newCode || !newCode.trim()) return;
+      try {
+        const res = await fetch(`/api/superadmin/companies/${c.id}/initiation-code`, {
+          method: 'PUT', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ initiationCode: newCode.trim() }),
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: `Initiation code updated for ${c.name}` });
+          void loadCompanies();
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Could not update initiation code.' });
+      }
+    };
+
+    return <>
+      <PageHeader title="Super Admin Workspace Management" description="Create company workspaces, generate Admin IDs & Passwords, and manage initiation codes." action={<Btn onClick={() => setCreateOpen(true)}><Plus size={15} /> Create Company & Admin</Btn>} />
+      {notices}
+      <Card>
+        <CardTitle title="Registered Companies & Workspace Admins" detail={`${companiesList.length} total companies`} right={<Building2 size={16} className="text-[#347858]" />} />
+        {loadingComps ? <LoadingRows /> : companiesList.length ? <Table headers={['Company Workspace', 'Admin Details', 'Initiation Code', 'Members', 'Actions']}>
+          {companiesList.map(c => <tr key={c.id}>
+            <td className="px-5 py-3">
+              <div><p className="text-[12px] font-bold text-[#273832]">{c.name}</p><p className="text-[10px] text-[#808d87]">{c.industry} · {c.website || 'No website'}</p></div>
+            </td>
+            <td className="px-4 py-3">
+              <div><p className="text-[12px] font-semibold text-[#32423d]">{c.adminName}</p><p className="text-[10px] font-mono text-[#667671]">{c.adminEmail}</p></div>
+            </td>
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                <span className="rounded bg-[#edf5f0] px-2 py-1 font-mono text-[12px] font-bold text-[#285e43]">{c.initiationCode}</span>
+                <button onClick={() => editInitiationCodeItem(c)} className="text-[11px] font-semibold text-[#28785b] hover:underline">Edit</button>
+              </div>
+            </td>
+            <td className="px-4 py-3 text-[12px] font-semibold text-[#485752]">{c.memberCount}</td>
+            <td className="px-4 py-3">
+              <div className="flex items-center gap-2">
+                <Btn kind="soft" onClick={() => setResetTarget(c)}><LockKeyhole size={13} /> Reset Pass</Btn>
+                <Btn kind="danger" onClick={() => deleteCompanyItem(c)}><Trash2 size={13} /> Delete</Btn>
+              </div>
+            </td>
+          </tr>)}
+        </Table> : <Empty title="No companies configured" detail="Create your first company workspace to generate admin credentials and an initiation code." button={<Btn onClick={() => setCreateOpen(true)}><Plus size={14} /> Create Company & Admin</Btn>} />}
+      </Card>
+      {createOpen && <Dialog title="Create Company & Workspace Admin" onClose={() => setCreateOpen(false)}>
+        <form onSubmit={submitCreateCompany} className="space-y-3 p-5">
+          <FieldInput field={{ key: 'name', label: 'Company Name', required: true }} value={compForm.name} set={v => setCompForm({ ...compForm, name: v })} />
+          <FieldInput field={{ key: 'adminName', label: 'Admin Full Name', required: true }} value={compForm.adminName} set={v => setCompForm({ ...compForm, adminName: v })} />
+          <FieldInput field={{ key: 'adminEmail', label: 'Admin Email (Sign-in ID)', type: 'email', required: true }} value={compForm.adminEmail} set={v => setCompForm({ ...compForm, adminEmail: v })} />
+          <FieldInput field={{ key: 'adminPassword', label: 'Admin Password', type: 'password', required: true }} value={compForm.adminPassword} set={v => setCompForm({ ...compForm, adminPassword: v })} />
+          <FieldInput field={{ key: 'initiationCode', label: 'Initiation Code for User Registration', required: true }} value={compForm.initiationCode} set={v => setCompForm({ ...compForm, initiationCode: v })} />
+          <div className="flex justify-end gap-2 pt-3">
+            <Btn kind="outline" onClick={() => setCreateOpen(false)}>Cancel</Btn>
+            <Btn type="submit" disabled={savingComp}>{savingComp ? 'Creating…' : 'Create Company & Admin'}</Btn>
+          </div>
+        </form>
+      </Dialog>}
+      {resetTarget && <Dialog title={`Reset Password for ${resetTarget.name}`} onClose={() => setResetTarget(null)}>
+        <form onSubmit={submitResetPassword} className="space-y-4 p-5">
+          <p className="text-[12px] text-[#63736e]">Updating password for workspace admin: <strong>{resetTarget.adminEmail}</strong></p>
+          <FieldInput field={{ key: 'passInput', label: 'New Password (min 8 chars)', type: 'password', required: true }} value={passInput} set={setPassInput} />
+          <div className="flex justify-end gap-2 pt-2">
+            <Btn kind="outline" onClick={() => setResetTarget(null)}>Cancel</Btn>
+            <Btn type="submit" disabled={resettingPass}>{resettingPass ? 'Resetting…' : 'Update Password'}</Btn>
+          </div>
+        </form>
+      </Dialog>}
+    </>;
+  }
+
+  let content: ReactNode;
+  switch (path) {
+    case '/dashboard': content = <Dashboard />; break;
+    case '/contacts': content = <ResourcePage entity="contacts" />; break;
+    case '/deals': content = <ResourcePage entity="deals" />; break;
+    case '/tasks': content = <ResourcePage entity="tasks" />; break;
+    case '/analytics': content = <Redirect to="/dashboard" />; break;
+    case '/team': content = <Team />; break;
+    case '/inbox': content = <InboxPage />; break;
+    case '/community': content = <Community />; break;
+    case '/super-admin': content = <SuperAdminPage />; break;
+    default: content = <NotFound />;
+  }
+  if (!approved) return <AppShell path={path} member={member}><Card className="mt-16 mx-auto max-w-lg"><Empty title="Checking workspace access" detail="Your membership is still being confirmed. CRM data remains private until access is approved." button={<Btn kind="outline" onClick={() => window.location.reload()}><RotateCw size={14} /> Check status</Btn>} /></Card></AppShell>;
+  return <AppShell path={path} member={member}><div className="fade-in">{failed && <NoticeBar notice={{ tone: 'bad', text: 'Some workspace data could not be loaded. Retry the section below.' }} clear={() => qs.forEach((q: any) => q.refetch())} />}{content}</div></AppShell>;
+}
+
+function MemberGate({ path }: { path: string }) {
+  const { isLoaded, member } = useAuth();
+  if (!isLoaded) return <div className="grid min-h-[100dvh] place-items-center bg-[#f6f8f7]"><div className="flex items-center gap-3 rounded-xl border border-[#e3e9e5] bg-white px-5 py-4 text-[12px] text-[#71807a]"><span className="h-2 w-2 animate-pulse rounded-full bg-[#599570]" /> Preparing your workspace…</div></div>;
+  if (!member) return <Redirect to="/sign-in" />;
+  return <Workspace path={path} member={member} />;
+}
+
+function HomeRedirect() {
+  const { isLoaded, member } = useAuth();
+  if (isLoaded && member) return <Redirect to={member.role === 'super_admin' ? '/super-admin' : '/dashboard'} />;
+  return <Landing />;
+}
+function ProtectedRoute({ path }: { path: string }) { return <MemberGate path={path} />; }
+function RouterContent() {
+  return <Switch>
+    <Route path="/" component={HomeRedirect} />
+    <Route path="/sign-in/*?" component={SignInPage} />
+    <Route path="/sign-up/*?" component={SignUpPage} />
+    <Route path="/super-admin"><ProtectedRoute path="/super-admin" /></Route>
+    {navGroups.flatMap(g => g.items).map(item => <Route key={item.href} path={item.href}><ProtectedRoute path={item.href} /></Route>)}
+    <Route component={NotFound} />
+  </Switch>;
+}
+function App() {
+  return <WouterRouter base={basePath}><QueryClientProvider client={client}><AuthProvider><RouterContent /></AuthProvider></QueryClientProvider></WouterRouter>;
+}
+export default App;

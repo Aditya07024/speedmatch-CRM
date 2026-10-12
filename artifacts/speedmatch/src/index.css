@@ -1,0 +1,48 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@500;600;700;800&display=swap');
+@layer theme, base, components, utilities;
+@import 'tailwindcss';
+@import 'tw-animate-css';
+@plugin "@tailwindcss/typography";
+@custom-variant dark (&:is(.dark *));
+@theme inline {
+  --color-background: hsl(var(--background)); --color-foreground: hsl(var(--foreground));
+  --color-border: hsl(var(--border)); --color-input: hsl(var(--input)); --color-ring: hsl(var(--ring));
+  --color-card: hsl(var(--card)); --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover)); --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary)); --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary)); --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted)); --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent)); --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive)); --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-chart-1: hsl(var(--chart-1)); --color-chart-2: hsl(var(--chart-2)); --color-chart-3: hsl(var(--chart-3));
+  --color-chart-4: hsl(var(--chart-4)); --color-chart-5: hsl(var(--chart-5));
+  --color-sidebar: hsl(var(--sidebar)); --color-sidebar-foreground: hsl(var(--sidebar-foreground));
+  --font-sans: var(--app-font-sans); --font-mono: var(--app-font-mono); --radius-lg: var(--radius);
+}
+:root {
+  color-scheme: light;
+  --background: 210 25% 97%; --foreground: 221 28% 18%; --border: 216 22% 89%; --input: 216 22% 89%; --ring: 158 46% 40%;
+  --card: 0 0% 100%; --card-foreground: 221 28% 18%; --popover: 0 0% 100%; --popover-foreground: 221 28% 18%;
+  --primary: 158 46% 34%; --primary-foreground: 0 0% 100%; --secondary: 210 24% 93%; --secondary-foreground: 221 24% 24%;
+  --muted: 210 20% 94%; --muted-foreground: 215 13% 48%; --accent: 158 45% 93%; --accent-foreground: 158 46% 26%;
+  --destructive: 2 62% 51%; --destructive-foreground: 0 0% 100%;
+  --chart-1: 158 46% 37%; --chart-2: 197 42% 53%; --chart-3: 36 78% 60%; --chart-4: 262 31% 64%; --chart-5: 4 57% 65%;
+  --sidebar: 221 28% 18%; --sidebar-foreground: 216 26% 92%; --radius: .7rem;
+  --app-font-sans: 'DM Sans', sans-serif; --app-font-mono: 'SFMono-Regular', Consolas, monospace;
+}
+.dark {
+  color-scheme: dark; --background: 220 25% 11%; --foreground: 210 24% 92%; --border: 220 18% 24%; --input: 220 18% 24%;
+  --card: 220 24% 14%; --card-foreground: 210 24% 92%; --popover: 220 24% 14%; --popover-foreground: 210 24% 92%;
+  --primary: 158 48% 49%; --primary-foreground: 220 28% 12%; --secondary: 220 18% 22%; --secondary-foreground: 210 24% 92%;
+  --muted: 220 18% 20%; --muted-foreground: 216 14% 64%; --accent: 158 30% 22%; --accent-foreground: 158 48% 75%;
+  --destructive: 2 62% 55%; --destructive-foreground: 0 0% 100%; --sidebar: 220 29% 8%; --sidebar-foreground: 216 26% 92%;
+  --ring: 158 46% 49%; --chart-1: 158 48% 49%; --chart-2: 197 49% 64%; --chart-3: 36 78% 66%; --chart-4: 262 45% 72%; --chart-5: 4 60% 69%;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: hsl(var(--background)); color: hsl(var(--foreground)); font-family: var(--app-font-sans); -webkit-font-smoothing: antialiased; }
+button, input, textarea, select { font: inherit; }
+button { cursor: pointer; }
+.font-display { font-family: 'Manrope', sans-serif; }
+.fade-in { animation: rise .36s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes rise { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.cl-formFieldInput::placeholder { color: #84908f; opacity: 1; }
