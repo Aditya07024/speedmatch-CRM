@@ -245,7 +245,7 @@ router.put(
   },
 );
 
-// POST /api/team/assign-employee - Workspace Admin assigns an Employee directly
+// POST /api/team/assign-employee - Workspace Admin assigns a teammate (Admin or Employee) directly
 router.post(
   "/team/assign-employee",
   requireAdmin,
@@ -253,6 +253,7 @@ router.post(
     const admin = getRequestMember(res);
     const email = String(req.body?.email ?? "").trim().toLowerCase();
     const name = String(req.body?.name ?? "").trim();
+    const role = req.body?.role === "admin" ? "admin" : "member";
 
     if (!email || !email.includes("@")) {
       res.status(400).json({ error: "Valid email is required" });
@@ -262,14 +263,14 @@ router.post(
     const [existing] = await db
       .select()
       .from(teamMembersTable)
-      .where(sql`lower(${teamMembersTable.email}) = ${email}`)
+      .where(sql`lower(trim(${teamMembersTable.email})) = ${email}`)
       .limit(1);
 
     if (existing) {
       const [updated] = await db
         .update(teamMembersTable)
         .set({
-          role: "member",
+          role,
           status: "active",
           companyId: admin.companyId ?? existing.companyId,
           name: name || existing.name,
@@ -277,7 +278,14 @@ router.post(
         .where(eq(teamMembersTable.id, existing.id))
         .returning();
 
-      await addActivity("team", "Assigned employee to workspace", email);
+      if (role === "admin" && (admin.companyId ?? existing.companyId)) {
+        await db
+          .update(companiesTable)
+          .set({ adminEmail: email })
+          .where(eq(companiesTable.id, (admin.companyId ?? existing.companyId)!));
+      }
+
+      await addActivity("team", `Assigned ${role === "admin" ? "Workspace Admin" : "Employee"} access`, email);
       res.json({ ok: true, member: memberForResponse(updated) });
       return;
     }
@@ -288,13 +296,20 @@ router.post(
         authId: randomUUID(),
         email,
         name: name || email.split("@")[0],
-        role: "member",
+        role,
         status: "active",
         companyId: admin.companyId,
       })
       .returning();
 
-    await addActivity("team", "Pre-assigned employee to workspace", email);
+    if (role === "admin" && admin.companyId) {
+      await db
+        .update(companiesTable)
+        .set({ adminEmail: email })
+        .where(eq(companiesTable.id, admin.companyId));
+    }
+
+    await addActivity("team", `Pre-assigned ${role === "admin" ? "Workspace Admin" : "Employee"} access`, email);
     res.status(201).json({ ok: true, member: memberForResponse(created) });
   },
 );

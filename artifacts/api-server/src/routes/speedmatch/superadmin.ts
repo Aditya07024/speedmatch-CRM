@@ -348,6 +348,11 @@ router.post("/superadmin/requests/:id/approve-admin", async (req, res): Promise<
       })
       .returning();
     if (comp) companyId = comp.id;
+  } else {
+    await db
+      .update(companiesTable)
+      .set({ adminEmail: member.email })
+      .where(eq(companiesTable.id, companyId));
   }
 
   const [updated] = await db
@@ -402,17 +407,36 @@ router.post("/superadmin/requests/:id/reject", async (req, res): Promise<void> =
 router.post("/superadmin/assign-admin", async (req, res): Promise<void> => {
   const email = String(req.body?.email ?? "").trim().toLowerCase();
   const name = String(req.body?.name ?? "").trim();
-  const companyId = req.body?.companyId ? Number(req.body.companyId) : null;
+  let companyId = req.body?.companyId ? Number(req.body.companyId) : null;
 
   if (!email || !email.includes("@")) {
     res.status(400).json({ error: "Valid email is required" });
     return;
   }
 
+  // Ensure workspace exists and has this adminEmail set
+  if (!companyId) {
+    const compName = `${name.trim() || email.split("@")[0]}'s Workspace`;
+    const [comp] = await db
+      .insert(companiesTable)
+      .values({
+        name: compName,
+        adminEmail: email,
+        owner: name || email.split("@")[0],
+      })
+      .returning();
+    if (comp) companyId = comp.id;
+  } else {
+    await db
+      .update(companiesTable)
+      .set({ adminEmail: email })
+      .where(eq(companiesTable.id, companyId));
+  }
+
   const [existing] = await db
     .select()
     .from(teamMembersTable)
-    .where(sql`lower(${teamMembersTable.email}) = ${email}`)
+    .where(sql`lower(trim(${teamMembersTable.email})) = ${email}`)
     .limit(1);
 
   if (existing) {
@@ -440,7 +464,7 @@ router.post("/superadmin/assign-admin", async (req, res): Promise<void> => {
       name: name || email.split("@")[0],
       role: "admin",
       status: "active",
-      companyId: companyId,
+      companyId,
     })
     .returning();
 

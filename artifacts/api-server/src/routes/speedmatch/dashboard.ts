@@ -102,7 +102,9 @@ router.get("/dashboard", async (_req, res): Promise<void> => {
       wonThisMonth,
       tasksDue: tasks.filter(
         (task) =>
-          task.status !== "Completed" && !!task.dueDate && task.dueDate <= today,
+          !/complete/i.test(task.status || "") &&
+          !!task.dueDate &&
+          task.dueDate <= today,
       ).length,
       pendingJoinees: pending.length,
       monthlyRevenue: revenueByMonth(deals),

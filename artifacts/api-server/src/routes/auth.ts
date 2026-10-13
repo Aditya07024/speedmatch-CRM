@@ -51,21 +51,21 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
   const [assignedCompany] = await db
     .select()
     .from(companiesTable)
-    .where(sql`lower(${companiesTable.adminEmail}) = ${email}`)
+    .where(sql`lower(trim(${companiesTable.adminEmail})) = ${email}`)
     .limit(1);
 
   // Check if email has pending invitation from an admin
   const [invitation] = await db
     .select()
     .from(invitationsTable)
-    .where(and(sql`lower(${invitationsTable.email}) = ${email}`, eq(invitationsTable.status, "pending")))
+    .where(and(sql`lower(trim(${invitationsTable.email})) = ${email}`, eq(invitationsTable.status, "pending")))
     .limit(1);
 
   // Check if member already exists in team database
   const [existing] = await db
     .select()
     .from(teamMembersTable)
-    .where(sql`lower(${teamMembersTable.email}) = ${email}`)
+    .where(sql`lower(trim(${teamMembersTable.email})) = ${email}`)
     .limit(1);
 
   if (existing) {
@@ -75,11 +75,28 @@ router.post("/auth/clerk-sync", async (req, res): Promise<void> => {
     if (avatarUrl && !existing.avatarUrl) updates.avatarUrl = avatarUrl;
     if (name && (!existing.name || existing.name === existing.email.split("@")[0])) updates.name = name;
 
-    // If pre-assigned as company admin or invited by a teammate, activate immediately!
+    // If pre-assigned as company admin, or already an admin, or invited by a teammate, activate immediately!
     if (assignedCompany) {
       updates.role = "admin";
       updates.status = "active";
       if (!existing.companyId) updates.companyId = assignedCompany.id;
+    } else if (existing.role === "admin") {
+      updates.role = "admin";
+      updates.status = "active";
+      if (!existing.companyId) {
+        const compName = `${(existing.name || name).trim() || email.split("@")[0]}'s Workspace`;
+        const [comp] = await db
+          .insert(companiesTable)
+          .values({
+            name: compName,
+            adminEmail: email,
+            owner: existing.name || name,
+          })
+          .returning();
+        if (comp) updates.companyId = comp.id;
+      }
+    } else if (existing.status === "active") {
+      updates.status = "active";
     } else if (invitation) {
       updates.role = invitation.role || "member";
       updates.status = "active";

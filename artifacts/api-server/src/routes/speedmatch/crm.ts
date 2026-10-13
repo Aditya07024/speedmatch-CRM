@@ -1,11 +1,13 @@
 import { Router, type IRouter } from "express";
-import { desc, eq, ilike, or } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { desc, eq, ilike, or, sql } from "drizzle-orm";
 import {
   companiesTable,
   contactsTable,
   db,
   dealsTable,
   tasksTable,
+  teamMembersTable,
 } from "@workspace/db";
 import {
   CreateCompanyBody,
@@ -26,6 +28,7 @@ import {
   DeleteTaskResponse,
   ListCompaniesQueryParams,
   ListCompaniesResponse,
+  ListCompaniesResponseItem,
   ListContactsQueryParams,
   ListContactsResponse,
   ListDealsQueryParams,
@@ -172,7 +175,11 @@ router.get("/companies", async (req, res): Promise<void> => {
       ]),
     )
     .orderBy(desc(companiesTable.createdAt));
-  res.json(ListCompaniesResponse.parse(rows.map(isoCompany)));
+  const mapped = rows.map((r) => ({
+    ...ListCompaniesResponseItem.parse(isoCompany(r)),
+    adminEmail: r.adminEmail || "",
+  }));
+  res.json(mapped);
 });
 
 router.post("/companies", async (req, res): Promise<void> => {
@@ -181,9 +188,54 @@ router.post("/companies", async (req, res): Promise<void> => {
     res.status(400).json({ error: parsed.error.message });
     return;
   }
-  const [row] = await db.insert(companiesTable).values(parsed.data).returning();
-  await addActivity("company", "Company added", parsed.data.name);
-  res.status(201).json(CreateCompanyResponse.parse(isoCompany(row)));
+  const adminEmail = String(req.body?.adminEmail ?? req.body?.admin_email ?? "").trim().toLowerCase();
+  const adminName = String(req.body?.adminName ?? req.body?.admin_name ?? "").trim();
+
+  const [row] = await db
+    .insert(companiesTable)
+    .values({
+      ...parsed.data,
+      ...(adminEmail ? { adminEmail } : {}),
+      ...(adminName && !parsed.data.owner ? { owner: adminName } : {}),
+    })
+    .returning();
+
+  // If adminEmail is provided, immediately create or activate that user as active Admin!
+  if (adminEmail && adminEmail.includes("@")) {
+    const [existing] = await db
+      .select({ id: teamMembersTable.id, name: teamMembersTable.name })
+      .from(teamMembersTable)
+      .where(sql`lower(${teamMembersTable.email}) = ${adminEmail}`)
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(teamMembersTable)
+        .set({
+          name: adminName || existing.name,
+          role: "admin",
+          status: "active",
+          companyId: row.id,
+        })
+        .where(eq(teamMembersTable.id, existing.id));
+    } else {
+      await db.insert(teamMembersTable).values({
+        authId: randomUUID(),
+        email: adminEmail,
+        name: adminName || `${row.name} Admin`,
+        role: "admin",
+        status: "active",
+        companyId: row.id,
+      });
+    }
+  }
+
+  await addActivity("company", "Company added & Admin assigned", `${row.name} (${adminEmail || "No admin assigned"})`);
+  res.status(201).json({
+    ...CreateCompanyResponse.parse(isoCompany(row)),
+    adminEmail: row.adminEmail ?? undefined,
+    adminName: adminName || undefined,
+  });
 });
 
 router.patch("/companies/:id", async (req, res): Promise<void> => {
@@ -193,17 +245,61 @@ router.patch("/companies/:id", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error?.message ?? body.error?.message });
     return;
   }
+  const hasAdminEmail = req.body?.adminEmail !== undefined || req.body?.admin_email !== undefined;
+  const adminEmail = hasAdminEmail
+    ? String(req.body?.adminEmail ?? req.body?.admin_email ?? "").trim().toLowerCase()
+    : undefined;
+  const adminName = String(req.body?.adminName ?? req.body?.admin_name ?? "").trim();
+
   const [row] = await db
     .update(companiesTable)
-    .set(body.data)
+    .set({
+      ...body.data,
+      ...(adminEmail !== undefined ? { adminEmail: adminEmail || null } : {}),
+      ...(adminName && !body.data.owner ? { owner: adminName } : {}),
+    })
     .where(eq(companiesTable.id, params.data.id))
     .returning();
   if (!row) {
     res.status(404).json({ error: "Company not found" });
     return;
   }
+
+  // If adminEmail is updated, activate that user as Admin for this company!
+  if (adminEmail && adminEmail.includes("@")) {
+    const [existing] = await db
+      .select({ id: teamMembersTable.id, name: teamMembersTable.name })
+      .from(teamMembersTable)
+      .where(sql`lower(${teamMembersTable.email}) = ${adminEmail}`)
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(teamMembersTable)
+        .set({
+          name: adminName || existing.name,
+          role: "admin",
+          status: "active",
+          companyId: row.id,
+        })
+        .where(eq(teamMembersTable.id, existing.id));
+    } else {
+      await db.insert(teamMembersTable).values({
+        authId: randomUUID(),
+        email: adminEmail,
+        name: adminName || `${row.name} Admin`,
+        role: "admin",
+        status: "active",
+        companyId: row.id,
+      });
+    }
+  }
+
   await addActivity("company", "Company updated", row.name);
-  res.json(UpdateCompanyResponse.parse(isoCompany(row)));
+  res.json({
+    ...UpdateCompanyResponse.parse(isoCompany(row)),
+    adminEmail: row.adminEmail ?? undefined,
+  });
 });
 
 router.delete("/companies/:id", async (req, res): Promise<void> => {

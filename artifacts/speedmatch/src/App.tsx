@@ -459,7 +459,10 @@ const fields: Record<string, Field[]> = {
     { key: 'source', label: 'Source' }, { key: 'owner', label: 'Owner' }, { key: 'phone', label: 'Phone' }, { key: 'notes', label: 'Notes', type: 'textarea' },
   ],
   companies: [
-    { key: 'name', label: 'Company name', required: true }, { key: 'industry', label: 'Industry' }, { key: 'website', label: 'Website' },
+    { key: 'name', label: 'Company name', required: true },
+    { key: 'adminEmail', label: 'Workspace Admin Email', type: 'email', placeholder: 'admin@company.com' },
+    { key: 'adminName', label: 'Admin Full Name', placeholder: 'e.g. Jane Doe' },
+    { key: 'industry', label: 'Industry' }, { key: 'website', label: 'Website' },
     { key: 'size', label: 'Team size', options: ['1–10', '11–50', '51–200', '201–500', '500+'] },
     { key: 'status', label: 'Status', options: ['Prospect', 'Customer', 'Partner', 'Inactive'] }, { key: 'owner', label: 'Owner' },
   ],
@@ -529,17 +532,50 @@ function FieldInput({ field, value, set }: { field: Field; value: any; set: (val
   return <label className="block text-[12px] font-semibold text-[#52605d]">{field.label}{field.required && <span className="ml-1 text-[#bc5c4e]">*</span>}
     {field.options ? <select required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} className={base}><option value="">Select {field.label.toLowerCase()}</option>{field.options.map(v => <option key={v} value={v}>{v}</option>)}</select> :
       field.type === 'textarea' ? <textarea required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} rows={3} className={`${base} resize-y`} placeholder={field.placeholder ?? `Add ${field.label.toLowerCase()}`} /> :
+      field.type === 'date' ? <input required={field.required} type="date" value={value ? String(value).slice(0, 10) : ''} onChange={e => set(e.target.value)} className={base} /> :
       <input required={field.required} type={field.type ?? 'text'} min={field.type === 'number' ? 0 : undefined} max={field.key === 'probability' ? 100 : undefined} value={value ?? ''} onChange={e => set(field.type === 'number' ? e.target.value : e.target.value)} className={base} placeholder={field.placeholder ?? `Enter ${field.label.toLowerCase()}`} />}
   </label>;
 }
 function RecordDialog({ entity, initial, onClose, onSave, busy }: { entity: string; initial?: AnyRecord; onClose: () => void; onSave: (data: AnyRecord) => void; busy: boolean }) {
+  const entityFields = fields[entity];
   const [form, setForm] = useState<AnyRecord>(() => {
     const raw: AnyRecord = {};
-    for (const f of fields[entity]) raw[f.key] = initial?.[f.key] ?? '';
+    for (const f of entityFields) {
+      let val = initial?.[f.key] ?? '';
+      if (f.type === 'date' && val) val = String(val).slice(0, 10);
+      raw[f.key] = val;
+    }
     return raw;
   });
   const title = `${initial ? 'Edit' : 'Add'} ${entity === 'contacts' ? 'contact' : entity === 'companies' ? 'company' : entity.slice(0, -1)}`;
-  return <Dialog title={title} onClose={onClose}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); const data: AnyRecord = { ...form }; for (const f of fields[entity]) { if (f.type === 'number' && data[f.key] !== '') data[f.key] = Number(data[f.key]); if (!data[f.key]) delete data[f.key]; } onSave(data); }}><div className="grid gap-4 sm:grid-cols-2">{fields[entity].map(field => <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}><FieldInput field={field} value={form[field.key]} set={value => setForm(old => ({ ...old, [field.key]: value }))} /></div>)}</div><div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4"><Btn kind="outline" onClick={onClose}>Cancel</Btn><Btn type="submit" disabled={busy}>{busy ? 'Saving…' : initial ? 'Save changes' : 'Create record'}</Btn></div></form></Dialog>;
+  return <Dialog title={title} onClose={onClose}>
+    <form className="space-y-4 p-5" onSubmit={e => {
+      e.preventDefault();
+      const data: AnyRecord = { ...form };
+      for (const f of entityFields) {
+        if (f.type === 'number' && data[f.key] !== '') data[f.key] = Number(data[f.key]);
+        if (!data[f.key]) delete data[f.key];
+      }
+      onSave(data);
+    }}>
+      {entity === 'companies' && (
+        <div className="rounded-lg border border-[#d6e7dc] bg-[#f2f8f4] px-3.5 py-2.5 text-[12px] text-[#2c5841]">
+          When you assign a Workspace Admin Email, that person is immediately granted Admin access. As soon as they sign in with Clerk using that email, their dashboard will unlock immediately.
+        </div>
+      )}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {entityFields.map(field => (
+          <div key={field.key} className={field.type === 'textarea' ? 'sm:col-span-2' : ''}>
+            <FieldInput field={field} value={form[field.key]} set={value => setForm(old => ({ ...old, [field.key]: value }))} />
+          </div>
+        ))}
+      </div>
+      <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+        <Btn kind="outline" onClick={onClose}>Cancel</Btn>
+        <Btn type="submit" disabled={busy}>{busy ? 'Saving…' : initial ? 'Save changes' : 'Create record'}</Btn>
+      </div>
+    </form>
+  </Dialog>;
 }
 
 function Landing() {
@@ -785,6 +821,7 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
       items: [
         { label: 'Workspaces & Access', href: '/super-admin', icon: ShieldCheck },
         { label: 'Companies', href: '/companies', icon: Building2 },
+        { label: 'Tasks', href: '/tasks', icon: ListTodo },
         { label: 'Community', href: '/community', icon: Compass },
       ],
     },
@@ -849,6 +886,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [conversationOpen, setConversationOpen] = useState(false);
   const [conversationForm, setConversationForm] = useState({ name: '', type: 'direct', memberIds: '' });
   const [feedback, setFeedback] = useState<Notice>(null);
+  const [taskTab, setTaskTab] = useState<'all' | 'remaining' | 'completed'>('all');
   const approved = String(member?.status || '').toLowerCase() === 'active';
   const isAdmin = String(member?.role || '').toLowerCase() === 'admin' || String(member?.role || '').toLowerCase() === 'owner';
   const queryOpts = <T extends unknown>(key: T, enabled = true, refetchInterval?: number) => ({ query: { enabled: approved && enabled, queryKey: key as any, refetchInterval } });
@@ -891,8 +929,12 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       if (initial) updateContact.mutate({ id: initial.id, data }, { onSuccess: () => done('Contact'), onError: () => setNotice({ tone: 'bad', text: 'Contact could not be saved. Check the fields and try again.' }) });
       else createContact.mutate({ data: data as any }, { onSuccess: () => done('Contact'), onError: () => setNotice({ tone: 'bad', text: 'Contact could not be created. Try again.' }) });
     } else if (entity === 'companies') {
-      if (initial) updateCompany.mutate({ id: initial.id, data }, { onSuccess: () => done('Company'), onError: () => setNotice({ tone: 'bad', text: 'Company could not be saved. Try again.' }) });
-      else createCompany.mutate({ data: data as any }, { onSuccess: () => done('Company'), onError: () => setNotice({ tone: 'bad', text: 'Company could not be created. Try again.' }) });
+      const onDone = () => {
+        done('Company');
+        qc.invalidateQueries({ queryKey: getListMembersQueryKey() });
+      };
+      if (initial) updateCompany.mutate({ id: initial.id, data }, { onSuccess: onDone, onError: () => setNotice({ tone: 'bad', text: 'Company could not be saved. Try again.' }) });
+      else createCompany.mutate({ data: data as any }, { onSuccess: onDone, onError: () => setNotice({ tone: 'bad', text: 'Company could not be created. Try again.' }) });
     } else if (entity === 'deals') {
       const dealData = { ...data, value: Number(data.value || 0) };
       if (initial) updateDeal.mutate({ id: initial.id, data: dealData }, { onSuccess: () => done('Deal'), onError: () => setNotice({ tone: 'bad', text: 'Deal could not be saved. Try again.' }) });
@@ -931,16 +973,53 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const rows: AnyRecord[] = resourceData[entity] || [];
     const query = resourceQuery[entity];
     const q = search.trim().toLowerCase();
-    const filtered = rows.filter(r => (!q || Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))) && (!filteredOnly || !/complete|won|lost|inactive/i.test(String(r.status || ''))));
+    const remainingTasksCount = entity === 'tasks' ? rows.filter(r => !/complete/i.test(String(r.status || ''))).length : 0;
+    const completedTasksCount = entity === 'tasks' ? rows.filter(r => /complete/i.test(String(r.status || ''))).length : 0;
+    const filtered = rows.filter(r => {
+      if (q && !Object.values(r).some(v => String(v ?? '').toLowerCase().includes(q))) return false;
+      if (entity === 'tasks') {
+        if (taskTab === 'remaining') return !/complete/i.test(String(r.status || ''));
+        if (taskTab === 'completed') return /complete/i.test(String(r.status || ''));
+      }
+      if (filteredOnly && /complete|won|lost|inactive/i.test(String(r.status || ''))) return false;
+      return true;
+    });
     const meta = resourceTitle[entity];
     const stageOptions = entity === 'deals' ? ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] : entity === 'tasks' ? ['Open', 'In progress', 'Completed'] : [];
-    return <><PageHeader title={meta.title} description={meta.description} action={<Btn onClick={() => setModal({ entity })}><Plus size={15} /> Add {meta.singular}</Btn>} />{notices}<Card><div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] px-4 py-3"><div className="relative min-w-[220px] flex-1 sm:max-w-[360px]"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid={`input-search-${entity}`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${entity}…`} className="w-full rounded-lg border border-[#e5ebe7] bg-[#fbfcfb] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#9fc5ac]" /></div><div className="flex items-center gap-2"><Badge>{filtered.length} records</Badge><Btn kind={filteredOnly ? 'soft' : 'ghost'} onClick={() => setFilteredOnly(v => !v)} className="px-2.5"><Filter size={14} /> {filteredOnly ? 'Active only' : 'Filter active'}</Btn></div></div>{query.isLoading ? <LoadingRows /> : query.isError ? <Empty title="Couldn’t load records" detail="The data service is unavailable right now. Retry when your connection is ready." button={<Btn kind="outline" onClick={() => query.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : filtered.length === 0 ? <Empty title={q ? 'No matching records' : `No ${entity} yet`} detail={q ? 'Try a different name or search term.' : `Add your first ${meta.singular} and start building a useful picture of your relationships.`} button={!q && <Btn onClick={() => setModal({ entity })}><Plus size={14} /> Add {meta.singular}</Btn>} /> :
+    return <><PageHeader title={meta.title} description={meta.description} action={<Btn onClick={() => setModal({ entity })}><Plus size={15} /> Add {meta.singular}</Btn>} />{notices}<Card>
+      {entity === 'tasks' && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0ee] bg-[#fbfcfb] px-4 py-2.5">
+          <span className="text-[11px] font-bold uppercase tracking-wider text-[#798882]">Filter Tasks:</span>
+          <button
+            type="button"
+            onClick={() => setTaskTab('all')}
+            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'all' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+          >
+            All Tasks ({rows.length})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskTab('remaining')}
+            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'remaining' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+          >
+            Remaining Tasks ({remainingTasksCount})
+          </button>
+          <button
+            type="button"
+            onClick={() => setTaskTab('completed')}
+            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'completed' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+          >
+            Completed ({completedTasksCount})
+          </button>
+        </div>
+      )}
+      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] px-4 py-3"><div className="relative min-w-[220px] flex-1 sm:max-w-[360px]"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid={`input-search-${entity}`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${entity}…`} className="w-full rounded-lg border border-[#e5ebe7] bg-[#fbfcfb] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#9fc5ac]" /></div><div className="flex items-center gap-2"><Badge>{filtered.length} records</Badge><Btn kind={filteredOnly ? 'soft' : 'ghost'} onClick={() => setFilteredOnly(v => !v)} className="px-2.5"><Filter size={14} /> {filteredOnly ? 'Active only' : 'Filter active'}</Btn></div></div>{query.isLoading ? <LoadingRows /> : query.isError ? <Empty title="Couldn’t load records" detail="The data service is unavailable right now. Retry when your connection is ready." button={<Btn kind="outline" onClick={() => query.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : filtered.length === 0 ? <Empty title={q ? 'No matching records' : `No ${entity} yet`} detail={q ? 'Try a different name or search term.' : `Add your first ${meta.singular} and start building a useful picture of your relationships.`} button={!q && <Btn onClick={() => setModal({ entity })}><Plus size={14} /> Add {meta.singular}</Btn>} /> :
       <Table headers={entity === 'contacts' ? ['Name', 'Company', 'Relationship', 'Owner', 'Added', ''] : entity === 'companies' ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', ''] : entity === 'deals' ? ['Opportunity', 'Company', 'Stage', 'Close date', 'Owner', ''] : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']}>
         {filtered.map(r => <tr key={r.id} data-testid={`row-${entity}-${r.id}`} className="group transition hover:bg-[#fafcfb]">
           {entity === 'contacts' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={r.name} size="sm" /><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.email || r.role || '—'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.createdAt)}</td></>}
           {entity === 'companies' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0f3f1] text-[#62716b]"><Building2 size={15} /></span><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.website || 'No website'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.industry || '—'}</td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.size || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
           {entity === 'deals' && <><td className="px-5 py-3"><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No contact'}</p></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><select aria-label={`Change ${r.name} stage`} data-testid={`select-stage-${r.id}`} value={r.stage || 'Discovery'} onChange={e => updateDeal.mutate({ id: r.id, data: { stage: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListDealsQueryKey() }); setNotice({ tone: 'good', text: 'Deal stage updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update deal stage.' }) })} className="rounded-md border-0 bg-transparent p-0 text-[11px] outline-none"><option>{r.stage}</option>{stageOptions.filter(x => x !== r.stage).map(x => <option key={x}>{x}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.expectedClose)}</td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
-          {entity === 'tasks' && <><td className="px-5 py-3"><p className={`text-[12px] font-semibold ${/complete/i.test(r.status) ? 'text-[#9aa49f] line-through' : 'text-[#33413d]'}`}>{r.title}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No linked contact'}</p></td><td className="px-4 py-3 text-[11px] text-[#64716d]">{r.type || '—'}</td><td className="px-4 py-3 text-[11px] text-[#64716d]">{dateLabel(r.dueDate)}</td><td className="px-4 py-3"><Badge tone={r.priority === 'High' ? 'red' : r.priority === 'Medium' ? 'amber' : 'neutral'}>{r.priority || 'Normal'}</Badge></td><td className="px-4 py-3"><select aria-label={`Change ${r.title} status`} data-testid={`select-task-status-${r.id}`} value={r.status || 'Open'} onChange={e => updateTask.mutate({ id: r.id, data: { status: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); setNotice({ tone: 'good', text: 'Task status updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task status.' }) })} className="rounded-md border-0 bg-transparent p-0 text-[11px] outline-none">{['Open', 'In progress', 'Completed'].map(v => <option key={v}>{v}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
+          {entity === 'tasks' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><button type="button" title={/complete/i.test(r.status || '') ? 'Mark as Open' : 'Mark as Completed'} onClick={() => { const nextStatus = /complete/i.test(r.status || '') ? 'Open' : 'Completed'; updateTask.mutate({ id: r.id, data: { status: nextStatus } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${r.title}" marked as ${nextStatus}.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) }); }} className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${/complete/i.test(r.status || '') ? 'border-[#30815f] bg-[#eaf4ef] text-[#28785b]' : 'border-[#d4dfd8] bg-white text-transparent hover:border-[#28785b] hover:text-[#28785b]/60'}`}><Check size={13} strokeWidth={2.5} /></button><div><p className={`text-[12px] font-semibold ${/complete/i.test(r.status) ? 'text-[#9aa49f] line-through' : 'text-[#33413d]'}`}>{r.title}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No linked contact'}</p></div></div></td><td className="px-4 py-3 text-[11px] text-[#64716d]">{r.type || '—'}</td><td className="px-4 py-3 text-[11px] text-[#64716d]">{dateLabel(r.dueDate)}</td><td className="px-4 py-3"><Badge tone={r.priority === 'High' ? 'red' : r.priority === 'Medium' ? 'amber' : 'neutral'}>{r.priority || 'Normal'}</Badge></td><td className="px-4 py-3"><select aria-label={`Change ${r.title} status`} data-testid={`select-task-status-${r.id}`} value={r.status || 'Open'} onChange={e => updateTask.mutate({ id: r.id, data: { status: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: 'Task status updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task status.' }) })} className="rounded-md border border-[#e1e8e4] bg-[#fafbfa] px-2 py-1 text-[11px] font-medium text-[#384842] outline-none">{['Open', 'In progress', 'Completed'].map(v => <option key={v}>{v}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
           <td className="px-3 py-3"><div className="flex justify-end gap-1 opacity-60 transition group-hover:opacity-100"><IconBtn icon={Pencil} onClick={() => setModal({ entity, row: r })} title="Edit record" /><IconBtn icon={Trash2} onClick={() => removeResource(entity, r)} title="Delete record" /></div></td>
         </tr>)}
       </Table>}</Card></>;
@@ -948,16 +1027,19 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
 
   function Dashboard() {
     const d: any = dash.data; const a: AnyRecord[] = (activity.data as AnyRecord[]) || [];
-    const topTasks = ((tasks.data as AnyRecord[]) || []).slice(0, 4);
+    const allTasksList = (tasks.data as AnyRecord[]) || [];
+    const remainingTasks = allTasksList.filter(t => !/complete/i.test(t.status || ''));
+    const completedTasks = allTasksList.filter(t => /complete/i.test(t.status || ''));
+    const topTasks = [...remainingTasks, ...completedTasks].slice(0, 5);
     return <><PageHeader title={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${(member.name || '').split(' ')[0] || 'there'}`} description="Here’s what’s happening across your relationships today." action={<Btn onClick={() => setModal({ entity: 'deals' })}><Plus size={15} /> New deal</Btn>} />{notices}
-      {dash.isLoading ? <div className="grid gap-3 sm:grid-cols-3">{[1,2,3].map(i => <div key={i} className="h-28 animate-pulse rounded-xl bg-white" />)}</div> : dash.isError ? <Card><Empty title="Dashboard is taking a pause" detail="We couldn’t load your workspace summary." button={<Btn kind="outline" onClick={() => dash.refetch()}><RotateCw size={14} /> Retry</Btn>} /></Card> : <div className="grid gap-3 sm:grid-cols-3"><Metric label="Active opportunities" value={String(d?.openDeals ?? 0)} note="Deals currently in progress" icon={BriefcaseBusiness} onClick={() => setLocation('/deals')} /><Metric label="Contacts" value={String(d?.contacts ?? 0)} note="People in your network" icon={ContactRound} onClick={() => setLocation('/contacts')} /><Metric label="Follow-ups due" value={String(d?.tasksDue ?? 0)} note={`${d?.pendingJoinees ?? 0} team requests to review`} icon={CalendarDays} onClick={() => setLocation('/tasks')} /></div>}
+      {dash.isLoading ? <div className="grid gap-3 sm:grid-cols-3">{[1,2,3].map(i => <div key={i} className="h-28 animate-pulse rounded-xl bg-white" />)}</div> : dash.isError ? <Card><Empty title="Dashboard is taking a pause" detail="We couldn’t load your workspace summary." button={<Btn kind="outline" onClick={() => dash.refetch()}><RotateCw size={14} /> Retry</Btn>} /></Card> : <div className="grid gap-3 sm:grid-cols-3"><Metric label="Active opportunities" value={String(d?.openDeals ?? 0)} note="Deals currently in progress" icon={BriefcaseBusiness} onClick={() => setLocation('/deals')} /><Metric label="Contacts" value={String(d?.contacts ?? 0)} note="People in your network" icon={ContactRound} onClick={() => setLocation('/contacts')} /><Metric label="Follow-ups due" value={String(d?.tasksDue ?? 0)} note={`${remainingTasks.length} tasks remaining`} icon={CalendarDays} onClick={() => setLocation('/tasks')} /></div>}
       <div className="mt-5 grid gap-4 xl:grid-cols-2">
         <Card>
           <CardTitle title="Pipeline by stage" detail="Opportunities by current stage" right={<Link href="/deals" className="text-[11px] font-semibold text-[#43815f]">View deals <ArrowRight size={12} className="inline" /></Link>} />
           {d?.stageBreakdown?.length ? <div className="space-y-4 p-5">{d.stageBreakdown.map((s: AnyRecord, i: number) => <div key={s.stage}><div className="mb-1.5 flex items-center justify-between"><span className="text-[11px] font-semibold text-[#53615c]">{s.stage}</span><span className="font-mono text-[10px] text-[#89948f]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#eff2f0]"><div className="h-full rounded-full bg-[#599570]" style={{ width: s.count > 0 ? `${Math.max(6, Math.min(100, (s.count / Math.max(...d.stageBreakdown.map((x: AnyRecord) => x.count), 1)) * 100))}%` : '0%', opacity: 1 - i * .09 }} /></div></div>)}</div> : <Empty title="No active pipeline" detail="Create an opportunity to see momentum by stage." button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>} />}
         </Card>
         <Card>
-          <CardTitle title="Today’s follow-ups" detail="Make the next conversation count" right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks <ArrowRight size={12} className="inline" /></Link>} />
+          <CardTitle title="Today’s follow-ups" detail={`${remainingTasks.length} tasks remaining · Make the next conversation count`} right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks ({allTasksList.length}) <ArrowRight size={12} className="inline" /></Link>} />
           {tasks.isLoading ? <LoadingRows /> : topTasks.length ? <div className="divide-y divide-[#f0f2f1]">{topTasks.map(t => <div key={t.id} className="flex items-center gap-3 px-5 py-3 transition hover:bg-[#fafcfb]"><button title={t.status === 'Completed' ? 'Mark open' : 'Mark completed'} onClick={() => updateTask.mutate({ id: t.id, data: { status: t.status === 'Completed' ? 'Open' : 'Completed' } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${t.title}" updated.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) })} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${t.status === 'Completed' ? 'bg-[#eaf4ee] text-[#28785b]' : 'bg-[#f5f2e9] text-[#9b8146] hover:bg-[#eae3d2]'}`}><Check size={14} /></button><button onClick={() => setModal({ entity: 'tasks', row: t })} className="min-w-0 flex-1 text-left"><p className={`truncate text-[11px] font-semibold ${t.status === 'Completed' ? 'text-[#9aa49f] line-through' : 'text-[#46534e]'}`}>{t.title}</p><p className="mt-0.5 text-[10px] text-[#89948f]">{t.contact || t.type || 'Follow-up'} · {dateLabel(t.dueDate)}</p></button><button onClick={() => setModal({ entity: 'tasks', row: t })}><ToneStatus value={t.status} /></button></div>)}</div> : <Empty title="Nothing on the list yet" detail="Add a follow-up so no relationship goes quiet." button={<Btn kind="soft" onClick={() => setModal({ entity: 'tasks' })}><Plus size={13} /> Add task</Btn>} />}
         </Card>
       </div>
@@ -972,6 +1054,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const joins: AnyRecord[] = ((requests.data || []) as AnyRecord[]).map(j => ({ ...j, createdAt: j.joinedAt }));
     const [assignEmail, setAssignEmail] = useState('');
     const [assignName, setAssignName] = useState('');
+    const [assignRole, setAssignRole] = useState<'member' | 'admin'>('member');
     const [assigningEmp, setAssigningEmp] = useState(false);
 
     const submitAssignEmployee = async (e: React.FormEvent) => {
@@ -983,31 +1066,35 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           method: 'POST',
           credentials: 'include',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email: assignEmail.trim(), name: assignName.trim() }),
+          body: JSON.stringify({ email: assignEmail.trim(), name: assignName.trim(), role: assignRole }),
         });
         if (res.ok) {
-          setNotice({ tone: 'good', text: `Employee "${assignEmail}" saved in database! When they log in via Clerk with this email, their dashboard will open immediately.` });
+          setNotice({ tone: 'good', text: `${assignRole === 'admin' ? 'Workspace Admin' : 'Employee'} "${assignEmail}" saved in database! When they log in via Clerk with this email, their dashboard will open immediately.` });
           setAssignEmail('');
           setAssignName('');
           qc.invalidateQueries({ queryKey: getListMembersQueryKey() });
         } else {
           const errData = await res.json().catch(() => ({}));
-          setNotice({ tone: 'bad', text: errData?.error || 'Could not assign employee.' });
+          setNotice({ tone: 'bad', text: errData?.error || 'Could not assign teammate.' });
         }
       } catch {
-        setNotice({ tone: 'bad', text: 'Failed to assign employee.' });
+        setNotice({ tone: 'bad', text: 'Failed to assign teammate.' });
       } finally {
         setAssigningEmp(false);
       }
     };
 
-    return <><PageHeader title="Team" description="Manage your team members and assign employee workspace access." action={isAdmin ? <Btn onClick={() => document.getElementById('assign-emp-email')?.focus()}><UserPlus size={15} /> Add teammate</Btn> : null} />{notices}
+    return <><PageHeader title="Team" description="Manage your team members and assign workspace access." action={isAdmin ? <Btn onClick={() => document.getElementById('assign-emp-email')?.focus()}><UserPlus size={15} /> Add teammate</Btn> : null} />{notices}
       {isAdmin && <Card className="mb-4">
-        <CardTitle title="Assign Employee Access by Email" detail="Write an employee's email address to save it in database. When that employee logs in with Clerk, their dashboard will open immediately." right={<UserCheck size={16} className="text-[#347858]" />} />
+        <CardTitle title="Assign Teammate Access by Email (Admin or Employee)" detail="Write a teammate's email address and choose their role to save in database. When they log in with Clerk, their dashboard will open immediately." right={<UserCheck size={16} className="text-[#347858]" />} />
         <form className="flex flex-col gap-3 p-4 sm:flex-row" onSubmit={submitAssignEmployee}>
-          <input id="assign-emp-email" data-testid="input-assign-employee-email" required type="email" placeholder="employee@company.com" value={assignEmail} onChange={e => setAssignEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
-          <input data-testid="input-assign-employee-name" type="text" placeholder="Full name (optional)" value={assignName} onChange={e => setAssignName(e.target.value)} className="min-w-0 sm:w-48 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
-          <Btn type="submit" disabled={assigningEmp || !assignEmail.trim()}><Check size={14} />{assigningEmp ? 'Saving…' : 'Save Employee in Database'}</Btn>
+          <input id="assign-emp-email" data-testid="input-assign-employee-email" required type="email" placeholder="teammate@company.com" value={assignEmail} onChange={e => setAssignEmail(e.target.value)} className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
+          <input data-testid="input-assign-employee-name" type="text" placeholder="Full name (optional)" value={assignName} onChange={e => setAssignName(e.target.value)} className="min-w-0 sm:w-44 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]" />
+          <select value={assignRole} onChange={e => setAssignRole(e.target.value as 'member' | 'admin')} className="rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] outline-none focus:border-[#90b99e]">
+            <option value="member">Employee (Member)</option>
+            <option value="admin">Workspace Admin</option>
+          </select>
+          <Btn type="submit" disabled={assigningEmp || !assignEmail.trim()}><Check size={14} />{assigningEmp ? 'Saving…' : `Save ${assignRole === 'admin' ? 'Admin' : 'Employee'} in Database`}</Btn>
         </form>
       </Card>}
       <Card className="mb-4"><CardTitle title="Team members" detail={`${team.length} approved members`} right={<ShieldCheck size={15} className="text-[#43815f]" />} />{members.isLoading ? <LoadingRows /> : members.isError ? <Empty title="Couldn’t load the team" detail="Refresh to check approved workspace members." button={<Btn kind="outline" onClick={() => members.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : team.length ? <Table headers={['Member', 'Role', 'Status', 'Joined']} min="min-w-[580px]">{team.map(m => <tr key={m.id} data-testid={`member-${m.id}`}><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={m.name} /><div><p className="text-[12px] font-semibold text-[#35433e]">{m.name}</p><p className="text-[10px] text-[#87938e]">{m.email} · Member ID {m.id}</p></div></div></td><td className="px-4 py-3"><Badge tone={m.role === 'admin' || m.role === 'owner' ? 'purple' : 'neutral'}>{m.role}</Badge></td><td className="px-4 py-3"><ToneStatus value={m.status} /></td><td className="px-4 py-3 text-[11px] text-[#85918c]">{dateLabel(m.joinedAt)}</td></tr>)}</Table> : <Empty title="It starts with your team" detail="Your team members will appear here once assigned." />}</Card>
@@ -1218,59 +1305,19 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     return <>
       <PageHeader
         title="Super Admin Workspace Management"
-        description="Create company workspaces, assign admin access by email, and review user access requests."
+        description="Review user access requests and manage workspace admins. Add companies (with their admin) from the Companies page or use the button below."
         action={
           <div className="flex flex-wrap items-center gap-2">
+            <Btn onClick={() => setCreateOpen(true)}>
+              <Plus size={15} /> Add Admin & Company Workspace
+            </Btn>
             <Btn kind="outline" onClick={() => { void loadCompanies(); void loadPending(); void loadAllUsers(); }}>
               <RotateCw size={13} className={loadingUsers || loadingPending || loadingComps ? 'animate-spin' : ''} /> Refresh
-            </Btn>
-            <Btn onClick={() => setCreateOpen(true)}>
-              <Plus size={15} /> Create Company Workspace & Assign Admin
             </Btn>
           </div>
         }
       />
       {notices}
-
-      {/* Unified Card: Create Company Workspace & Assign Admin */}
-      <Card className="mb-5">
-        <CardTitle
-          title="Create Company Workspace & Assign Admin"
-          detail="Write the company name and admin email to save in database. When this admin logs in via Clerk, their dashboard will unlock immediately."
-          right={<ShieldCheck size={16} className="text-[#347858]" />}
-        />
-        <form className="flex flex-col gap-3 p-5 sm:flex-row" onSubmit={submitCreateCompany}>
-          <input
-            data-testid="input-create-company-name"
-            type="text"
-            required
-            placeholder="Company Name (e.g. Acme Corp)"
-            value={compForm.name}
-            onChange={e => setCompForm({ ...compForm, name: e.target.value })}
-            className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
-          />
-          <input
-            data-testid="input-create-admin-email"
-            type="email"
-            required
-            placeholder="admin@company.com"
-            value={compForm.adminEmail}
-            onChange={e => setCompForm({ ...compForm, adminEmail: e.target.value })}
-            className="min-w-0 flex-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
-          />
-          <input
-            data-testid="input-create-admin-name"
-            type="text"
-            placeholder="Admin Full Name (optional)"
-            value={compForm.adminName}
-            onChange={e => setCompForm({ ...compForm, adminName: e.target.value })}
-            className="min-w-0 sm:w-56 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] outline-none focus:border-[#70a88c]"
-          />
-          <Btn type="submit" disabled={savingComp || !compForm.name.trim() || !compForm.adminEmail.trim()}>
-            <Check size={14} /> {savingComp ? 'Saving…' : 'Create & Assign Admin'}
-          </Btn>
-        </form>
-      </Card>
 
       {/* Card 2: Pending User Requests with Custom Messages */}
       <Card className="mb-5">
@@ -1394,7 +1441,17 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
 
       {/* Card 3: Registered Companies & Admins */}
       <Card>
-        <CardTitle title="Registered Companies & Workspace Admins" detail={`${companiesList.length} total companies`} right={<Building2 size={16} className="text-[#347858]" />} />
+        <CardTitle
+          title="Registered Companies & Workspace Admins"
+          detail={`${companiesList.length} total companies`}
+          right={
+            <div className="flex items-center gap-2">
+              <Btn onClick={() => setCreateOpen(true)} className="text-[12px] py-1.5 px-3">
+                <Plus size={13} /> Add Company Admin
+              </Btn>
+            </div>
+          }
+        />
         {loadingComps ? <LoadingRows /> : companiesList.length ? <Table headers={['Company Workspace', 'Assigned Admin', 'Status', 'Members', 'Actions']}>
           {companiesList.map(c => <tr key={c.id}>
             <td className="px-5 py-3">
@@ -1411,22 +1468,55 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
               <Btn kind="danger" onClick={() => deleteCompanyItem(c)}><Trash2 size={13} /> Delete</Btn>
             </td>
           </tr>)}
-        </Table> : <Empty title="No companies configured" detail="Create your first company workspace to assign admin credentials." button={<Btn onClick={() => setCreateOpen(true)}><Plus size={14} /> Create Company Workspace & Assign Admin</Btn>} />}
+        </Table> : <Empty title="No companies configured" detail="Create your first company workspace to assign admin credentials." button={<Btn onClick={() => setCreateOpen(true)}><Plus size={14} /> Add Admin & Company Workspace</Btn>} />}
       </Card>
-      {createOpen && <Dialog title="Create Company Workspace & Assign Admin" onClose={() => setCreateOpen(false)}>
-        <form onSubmit={submitCreateCompany} className="space-y-3 p-5">
-          <FieldInput field={{ key: 'name', label: 'Company Name', required: true, placeholder: 'e.g. Acme Corp' }} value={compForm.name} set={v => setCompForm({ ...compForm, name: v })} />
-          <FieldInput field={{ key: 'adminEmail', label: 'Admin Email (Clerk login email)', type: 'email', required: true, placeholder: 'admin@company.com' }} value={compForm.adminEmail} set={v => setCompForm({ ...compForm, adminEmail: v })} />
-          <FieldInput field={{ key: 'adminName', label: 'Admin Full Name (optional)', placeholder: 'e.g. Jane Doe' }} value={compForm.adminName} set={v => setCompForm({ ...compForm, adminName: v })} />
-          <FieldInput field={{ key: 'industry', label: 'Industry (optional)', placeholder: 'e.g. Software' }} value={compForm.industry} set={v => setCompForm({ ...compForm, industry: v })} />
-          <FieldInput field={{ key: 'website', label: 'Website (optional)', placeholder: 'e.g. acme.com' }} value={compForm.website} set={v => setCompForm({ ...compForm, website: v })} />
-          <p className="text-[11px] text-[#63736e]">When this admin signs in via Clerk with this email, their Admin Dashboard will unlock immediately.</p>
-          <div className="flex justify-end gap-2 pt-3">
-            <Btn kind="outline" onClick={() => setCreateOpen(false)}>Cancel</Btn>
-            <Btn type="submit" disabled={savingComp}>{savingComp ? 'Creating…' : 'Create & Assign Admin'}</Btn>
-          </div>
-        </form>
-      </Dialog>}
+      {createOpen && (
+        <Dialog title="Add Workspace Admin & Company" onClose={() => setCreateOpen(false)}>
+          <form className="space-y-4 p-5" onSubmit={submitCreateCompany}>
+            <p className="text-[12px] leading-5 text-[#596963]">
+              Creating a company workspace and assigning an admin email grants that user instant access to the platform once they log in via Clerk.
+            </p>
+            <FieldInput
+              field={{ key: 'name', label: 'Company Name', required: true }}
+              value={compForm.name}
+              set={v => setCompForm(f => ({ ...f, name: v }))}
+            />
+            <FieldInput
+              field={{ key: 'adminName', label: 'Admin Full Name', required: true }}
+              value={compForm.adminName}
+              set={v => setCompForm(f => ({ ...f, adminName: v }))}
+            />
+            <FieldInput
+              field={{ key: 'adminEmail', label: 'Admin Email (Clerk Login)', required: true }}
+              value={compForm.adminEmail}
+              set={v => setCompForm(f => ({ ...f, adminEmail: v }))}
+            />
+            <div className="grid grid-cols-2 gap-3">
+              <FieldInput
+                field={{ key: 'industry', label: 'Industry', options: ['Software', 'Fintech', 'Healthtech', 'Ecommerce', 'Services', 'Manufacturing', 'Other'] }}
+                value={compForm.industry}
+                set={v => setCompForm(f => ({ ...f, industry: v }))}
+              />
+              <FieldInput
+                field={{ key: 'size', label: 'Company Size', options: ['1-10', '11-50', '51-200', '201-500', '500+'] }}
+                value={compForm.size}
+                set={v => setCompForm(f => ({ ...f, size: v }))}
+              />
+            </div>
+            <FieldInput
+              field={{ key: 'website', label: 'Website (Optional)' }}
+              value={compForm.website}
+              set={v => setCompForm(f => ({ ...f, website: v }))}
+            />
+            <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+              <Btn kind="outline" onClick={() => setCreateOpen(false)}>Cancel</Btn>
+              <Btn type="submit" disabled={savingComp || !compForm.name.trim() || !compForm.adminEmail.trim()}>
+                {savingComp ? 'Creating…' : 'Create Admin & Workspace'}
+              </Btn>
+            </div>
+          </form>
+        </Dialog>
+      )}
     </>;
   }
 
@@ -1436,7 +1526,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     case '/contacts': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="contacts" />; break;
     case '/companies': content = <ResourcePage entity="companies" />; break;
     case '/deals': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="deals" />; break;
-    case '/tasks': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="tasks" />; break;
+    case '/tasks': content = <ResourcePage entity="tasks" />; break;
     case '/analytics': content = <Redirect to={member?.role === 'super_admin' ? '/super-admin' : '/dashboard'} />; break;
     case '/team': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Team />; break;
     case '/inbox': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <InboxPage />; break;
