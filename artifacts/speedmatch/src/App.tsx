@@ -8,10 +8,12 @@ import {
   ContactRound, Ellipsis, Filter, Inbox, LayoutDashboard, LogOut, MessageCircle, Plus, Search,
   Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
   Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText,
-  ShieldAlert, KeyRound, AlertCircle, UserCheck
+  ShieldAlert, KeyRound, AlertCircle, UserCheck, Download, Kanban, List, Trophy, DollarSign, Layers,
+  Phone, Video, FileSpreadsheet
 } from 'lucide-react';
 import {
   useGetDashboardSummary, getGetDashboardSummaryQueryKey, useGetDashboardActivity, getGetDashboardActivityQueryKey,
+  useGetAnalytics, getGetAnalyticsQueryKey,
   useListContacts, getListContactsQueryKey, useCreateContact, useUpdateContact, useDeleteContact,
   useListCompanies, getListCompaniesQueryKey, useCreateCompany, useUpdateCompany, useDeleteCompany,
   useListDeals, getListDealsQueryKey, useCreateDeal, useUpdateDeal, useDeleteDeal,
@@ -124,15 +126,32 @@ function AuthProvider({ children }: { children: ReactNode }) {
       await refresh();
     },
     signOut: async () => {
+      // 1. Invalidate backend session cookie first so no race can restore the session
       try {
-        if (window.Clerk) {
-          await window.Clerk.signOut();
+        await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' });
+      } catch {}
+
+      // 2. Clear query client cache, local/session storage, and member state
+      try {
+        client.clear();
+        localStorage.clear();
+        sessionStorage.clear();
+      } catch {}
+      setMember(null);
+
+      // 3. Prepare sign-in redirect URL
+      const targetUrl = `${window.location.origin}${basePath}/sign-in`;
+
+      // 4. Sign out from Clerk with explicit redirect to /sign-in
+      try {
+        if (window.Clerk && typeof window.Clerk.signOut === 'function') {
+          await window.Clerk.signOut({ redirectUrl: targetUrl });
+          return;
         }
       } catch {}
-      await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' }).catch(() => {});
-      client.clear();
-      setMember(null);
-      window.location.href = `${basePath}/sign-in`;
+
+      // 5. Fallback navigation if Clerk is not used or did not redirect
+      window.location.replace(`${basePath}/sign-in`);
     },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
@@ -291,21 +310,9 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
   const [loggingOut, setLoggingOut] = useState(false);
 
   const handleSignOut = async () => {
+    if (loggingOut) return;
     setLoggingOut(true);
-    try {
-      if (window.Clerk?.signOut) {
-        await window.Clerk.signOut();
-      }
-    } catch {}
-    try {
-      await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' });
-    } catch {}
-    try {
-      localStorage.clear();
-      sessionStorage.clear();
-    } catch {}
-    client.clear();
-    window.location.replace(`${basePath}/sign-in`);
+    await signOut();
   };
 
   const handleCheckStatus = async () => {
@@ -452,6 +459,26 @@ const navGroups = [
   { label: 'Manage', items: [{ label: 'Team', href: '/team', icon: Users }] },
 ];
 const pageNames: Record<string, string> = Object.fromEntries(navGroups.flatMap(g => g.items.map(i => [i.href, i.label])));
+function exportToCsv(data: AnyRecord[], filename: string) {
+  if (!data || !data.length) return;
+  const sample = data[0];
+  const keys = Object.keys(sample).filter(k => typeof sample[k] !== 'object' || sample[k] === null);
+  const headerRow = keys.map(k => `"${k}"`).join(',');
+  const rows = data.map(row => {
+    return keys.map(k => {
+      const v = row[k] ?? '';
+      return `"${String(v).replace(/"/g, '""')}"`;
+    }).join(',');
+  });
+  const csvContent = 'data:text/csv;charset=utf-8,' + encodeURIComponent([headerRow, ...rows].join('\n'));
+  const link = document.createElement('a');
+  link.setAttribute('href', csvContent);
+  link.setAttribute('download', `${filename}-${new Date().toISOString().slice(0, 10)}.csv`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
 const fields: Record<string, Field[]> = {
   contacts: [
     { key: 'name', label: 'Full name', required: true }, { key: 'email', label: 'Email', type: 'email', required: true },
@@ -467,14 +494,20 @@ const fields: Record<string, Field[]> = {
     { key: 'status', label: 'Status', options: ['Prospect', 'Customer', 'Partner', 'Inactive'] }, { key: 'owner', label: 'Owner' },
   ],
   deals: [
-    { key: 'name', label: 'Deal name', required: true }, { key: 'company', label: 'Company' }, { key: 'contact', label: 'Primary contact' },
+    { key: 'name', label: 'Deal name', required: true },
+    { key: 'value', label: 'Deal Value ($)', type: 'number', required: true, placeholder: 'e.g. 50000' },
     { key: 'stage', label: 'Stage', options: ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] },
-    { key: 'probability', label: 'Win probability (%)', type: 'number' }, { key: 'owner', label: 'Owner' }, { key: 'expectedClose', label: 'Expected close', type: 'date' },
+    { key: 'probability', label: 'Win probability (%)', type: 'number', placeholder: 'e.g. 60' },
+    { key: 'company', label: 'Company' }, { key: 'contact', label: 'Primary contact' },
+    { key: 'owner', label: 'Owner' }, { key: 'expectedClose', label: 'Expected close', type: 'date' },
   ],
   tasks: [
-    { key: 'title', label: 'Task title', required: true }, { key: 'type', label: 'Type', options: ['Call', 'Email', 'Meeting', 'Follow-up', 'Other'] },
-    { key: 'dueDate', label: 'Due date', type: 'date' }, { key: 'status', label: 'Status', options: ['Open', 'In progress', 'Completed'] },
-    { key: 'priority', label: 'Priority', options: ['Low', 'Medium', 'High'] }, { key: 'owner', label: 'Owner' }, { key: 'contact', label: 'Related contact' },
+    { key: 'title', label: 'Task title', required: true },
+    { key: 'type', label: 'Type', options: ['Call', 'Email', 'Meeting', 'Demo', 'Follow-up', 'Other'] },
+    { key: 'dueDate', label: 'Due date', type: 'date' },
+    { key: 'status', label: 'Status', options: ['Open', 'In progress', 'Completed'] },
+    { key: 'priority', label: 'Priority', options: ['Urgent', 'High', 'Medium', 'Low'] },
+    { key: 'owner', label: 'Owner' }, { key: 'contact', label: 'Related contact' },
   ],
 };
 
@@ -489,9 +522,9 @@ function Logo({ light = false }: { light?: boolean }) {
     </span>
   );
 }
-function Btn({ children, onClick, kind = 'primary', disabled = false, className = '', type = 'button' }: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'soft' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; className?: string; type?: 'button' | 'submit' }) {
+function Btn({ children, onClick, kind = 'primary', disabled = false, className = '', type = 'button', title }: { children: ReactNode; onClick?: () => void; kind?: 'primary' | 'soft' | 'outline' | 'ghost' | 'danger'; disabled?: boolean; className?: string; type?: 'button' | 'submit'; title?: string }) {
   const style = { primary: 'bg-[#28785b] text-white hover:bg-[#21664d] shadow-sm', soft: 'bg-[#eaf4ef] text-[#28785b] hover:bg-[#dfefe7]', outline: 'border border-[#dbe4e0] bg-white text-[#3e4c4d] hover:bg-[#f5f8f6]', ghost: 'text-[#657474] hover:bg-[#eff3f1]', danger: 'bg-[#fff0ed] text-[#ad493f] hover:bg-[#ffe5df]' }[kind];
-  return <button data-testid="button-action" type={type} onClick={onClick} disabled={disabled} className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-55 ${style} ${className}`}>{children}</button>;
+  return <button data-testid="button-action" type={type} onClick={onClick} disabled={disabled} title={title} className={`inline-flex items-center justify-center gap-2 rounded-lg px-3.5 py-2 text-[13px] font-semibold transition duration-150 disabled:cursor-not-allowed disabled:opacity-55 ${style} ${className}`}>{children}</button>;
 }
 function IconBtn({ icon: Icon, onClick, title }: { icon: any; onClick: () => void; title: string }) {
   return <button data-testid={`button-${title.toLowerCase().replaceAll(' ', '-')}`} onClick={onClick} title={title} className="rounded-md p-1.5 text-[#75827f] transition hover:bg-[#eef3f0] hover:text-[#28785b]"><Icon size={15} /></button>;
@@ -838,6 +871,13 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
+  const [loggingOut, setLoggingOut] = useState(false);
+  const handleSignOut = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    await signOut();
+  };
+
   return <div className="min-h-[100dvh] bg-[#f6f8f7]">
     {mobileOpen && <button aria-label="Close navigation" onClick={() => setMobileOpen(false)} className="fixed inset-0 z-30 bg-[#15231f]/30 md:hidden" />}
     <aside className={`fixed inset-y-0 left-0 z-40 flex w-[236px] flex-col bg-[#263934] text-[#d8e4dd] transition-transform duration-200 md:translate-x-0 ${mobileOpen ? 'translate-x-0' : '-translate-x-full'}`}>
@@ -845,7 +885,7 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
       <div className="mx-3 mt-5 flex items-center gap-2.5 rounded-lg border border-white/10 bg-white/[.055] px-3 py-2.5"><span className="flex h-7 w-7 items-center justify-center rounded-md bg-[#bddac6] text-[#28513c]"><BriefcaseBusiness size={14} /></span><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-bold text-white">{isSuperAdmin ? 'Super Admin Mode' : 'My workspace'}</p><p className="truncate text-[10px] text-[#a8b9af]">{isSuperAdmin ? 'Platform Management' : 'Startup team'}</p></div><ChevronDown size={13} className="text-[#a8b9af]" /></div>
       <nav className="mt-5 flex-1 space-y-5 overflow-y-auto px-3">{effectiveNavGroups.map(group => <div key={group.label}><div className="mb-2 px-3 text-[9px] font-bold uppercase tracking-[.17em] text-[#82968a]">{group.label}</div><div className="space-y-0.5">{group.items.map(({ label, href, icon: Icon }) => <Link key={href} href={href} onClick={() => setMobileOpen(false)} data-testid={`nav-${label.toLowerCase()}`} className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-[12px] font-medium transition ${path === href ? 'bg-[#e8f2eb] text-[#263d33] shadow-sm' : 'text-[#c0cec5] hover:bg-white/[.075] hover:text-white'}`}><Icon size={16} strokeWidth={1.8} /><span className="flex-1">{label}</span>{label === 'Inbox' && <span className="h-1.5 w-1.5 rounded-full bg-[#84c99b]" />}</Link>)}</div></div>)}</nav>
       <div className="m-3 rounded-xl border border-white/10 bg-[#30443d] p-3.5"><div className="flex items-center gap-2"><span className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#405c4e] text-[#b8d8c1]"><Sparkles size={14} /></span><span className="text-[11px] font-bold text-white">{isSuperAdmin ? 'Master Access' : 'Built for momentum'}</span></div><p className="mt-2 text-[10px] leading-4 text-[#b0c1b7]">{isSuperAdmin ? 'Super admin access control & workspace management.' : 'Keep the important conversations moving.'}</p></div>
-      <div className="border-t border-white/10 p-3"><button data-testid="button-account-menu" onClick={() => { void signOut(); }} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left hover:bg-white/[.06]"><Avatar name={name} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-white">{name}</span><span className="block truncate text-[10px] capitalize text-[#9eb0a5]">{member?.role || 'Member'} · Sign out</span></span><LogOut size={14} className="text-[#aabbb0]" /></button></div>
+      <div className="border-t border-white/10 p-3"><button data-testid="button-account-menu" disabled={loggingOut} onClick={handleSignOut} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-white/[.06] disabled:opacity-60"><Avatar name={name} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-white">{name}</span><span className="block truncate text-[10px] capitalize text-[#9eb0a5]">{loggingOut ? 'Signing out…' : `${member?.role || 'Member'} · Sign out`}</span></span><LogOut size={14} className={`text-[#aabbb0] ${loggingOut ? 'animate-spin' : ''}`} /></button></div>
     </aside>
     <div className="min-h-[100dvh] md:pl-[236px]">
       <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>{isSuperAdmin ? 'Super Admin' : 'Workspace'}</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{path === '/super-admin' ? 'Workspaces & Access' : (pageNames[path] || (isSuperAdmin ? 'Super Admin' : 'Dashboard'))}</span></div>{!isSuperAdmin && <div className="relative hidden lg:block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#919d97]" /><input ref={searchInputRef} aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div>}</div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> {isSuperAdmin ? 'Super Admin Active' : 'Synced'}</span>{!isSuperAdmin && <div className="relative"><button aria-label="Notifications" data-testid="status-notifications" onClick={() => setNotificationsOpen(v => !v)} className="relative rounded-lg p-2 text-[#76837e] transition hover:bg-[#edf2ef] hover:text-[#28785b]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#38855e]" /></button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e1e8e4] bg-white p-3 shadow-xl"><div className="mb-2 flex items-center justify-between border-b border-[#edf0ee] pb-2"><span className="text-[12px] font-bold text-[#32423c]">Notifications</span><span className="text-[10px] text-[#71817b]">Workspace live</span></div><div className="space-y-2 text-[11px]"><div className="rounded-lg bg-[#f6f9f7] p-2 text-[#465650]"><p className="font-semibold text-[#28785b]">Active Workspace Sync</p><p className="text-[10px] text-[#7b8984]">All contacts, deals, and tasks are synchronized.</p></div><Link href="/tasks" onClick={() => setNotificationsOpen(false)} className="block rounded-lg p-2 hover:bg-[#f3f7f5] text-[#34443e]"><p className="font-semibold">Review your follow-ups</p><p className="text-[10px] text-[#818f8a]">Check today’s task queue to maintain momentum.</p></Link></div></div>}</div>}<span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
@@ -887,15 +927,17 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [conversationForm, setConversationForm] = useState({ name: '', type: 'direct', memberIds: '' });
   const [feedback, setFeedback] = useState<Notice>(null);
   const [taskTab, setTaskTab] = useState<'all' | 'remaining' | 'completed'>('all');
+  const [dealView, setDealView] = useState<'kanban' | 'list'>('kanban');
   const approved = String(member?.status || '').toLowerCase() === 'active';
   const isAdmin = String(member?.role || '').toLowerCase() === 'admin' || String(member?.role || '').toLowerCase() === 'owner';
   const queryOpts = <T extends unknown>(key: T, enabled = true, refetchInterval?: number) => ({ query: { enabled: approved && enabled, queryKey: key as any, refetchInterval } });
 
   const dash = useGetDashboardSummary(queryOpts(getGetDashboardSummaryQueryKey(), path === '/dashboard', 30_000));
   const activity = useGetDashboardActivity(queryOpts(getGetDashboardActivityQueryKey(), path === '/dashboard', 30_000));
-  const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts'));
-  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), path === '/companies'));
-  const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals'));
+  const analytics = useGetAnalytics(queryOpts(getGetAnalyticsQueryKey(), path === '/dashboard', 30_000));
+  const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts' || path === '/dashboard'));
+  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), path === '/companies' || path === '/dashboard'));
+  const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals' || path === '/dashboard'));
   const tasks = useListTasks(undefined, queryOpts(getListTasksQueryKey(), path === '/tasks' || path === '/dashboard'));
   const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team'));
   const requests = useListJoinRequests({ query: { enabled: approved && isAdmin && path === '/team', queryKey: getListJoinRequestsQueryKey() } });
@@ -916,8 +958,29 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     qc.invalidateQueries({ queryKey: key });
     qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
     qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+    qc.invalidateQueries({ queryKey: getGetAnalyticsQueryKey() });
     setNotice({ tone: 'good', text });
     setModal(null);
+  }
+  const nextStageMap: Record<string, string> = {
+    Lead: 'Qualified',
+    Qualified: 'Proposal',
+    Proposal: 'Negotiation',
+    Negotiation: 'Won',
+  };
+  function moveDealStage(deal: AnyRecord, nextStage: string) {
+    updateDeal.mutate(
+      { id: deal.id, data: { stage: nextStage } },
+      {
+        onSuccess: () => {
+          qc.invalidateQueries({ queryKey: getListDealsQueryKey() });
+          qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+          qc.invalidateQueries({ queryKey: getGetAnalyticsQueryKey() });
+          setNotice({ tone: 'good', text: `Deal "${deal.name}" moved to ${nextStage}.` });
+        },
+        onError: () => setNotice({ tone: 'bad', text: 'Could not update deal stage.' }),
+      }
+    );
   }
   const resourceData: Record<string, any> = { contacts: contacts.data, companies: companies.data, deals: deals.data, tasks: tasks.data };
   const resourceQuery: Record<string, any> = { contacts, companies, deals, tasks };
@@ -936,7 +999,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       if (initial) updateCompany.mutate({ id: initial.id, data }, { onSuccess: onDone, onError: () => setNotice({ tone: 'bad', text: 'Company could not be saved. Try again.' }) });
       else createCompany.mutate({ data: data as any }, { onSuccess: onDone, onError: () => setNotice({ tone: 'bad', text: 'Company could not be created. Try again.' }) });
     } else if (entity === 'deals') {
-      const dealData = { ...data, value: Number(data.value || 0) };
+      const dealData = { ...data, value: Number(data.value || 0), probability: data.probability !== undefined && data.probability !== '' ? Number(data.probability) : 10 };
       if (initial) updateDeal.mutate({ id: initial.id, data: dealData }, { onSuccess: () => done('Deal'), onError: () => setNotice({ tone: 'bad', text: 'Deal could not be saved. Try again.' }) });
       else createDeal.mutate({ data: dealData as any }, { onSuccess: () => done('Deal'), onError: () => setNotice({ tone: 'bad', text: 'Deal could not be created. Try again.' }) });
     } else {
@@ -946,7 +1009,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   }
   function removeResource(entity: string, row: AnyRecord) {
     if (!window.confirm(`Delete "${row.name || row.title}"? This cannot be undone.`)) return;
-    const onSuccess = () => { qc.invalidateQueries({ queryKey: keys[entity] }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() }); setNotice({ tone: 'good', text: 'Record deleted.' }); };
+    const onSuccess = () => { qc.invalidateQueries({ queryKey: keys[entity] }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() }); qc.invalidateQueries({ queryKey: getGetAnalyticsQueryKey() }); setNotice({ tone: 'good', text: 'Record deleted.' }); };
     const onError = () => setNotice({ tone: 'bad', text: 'Record could not be deleted. Please try again.' });
     if (entity === 'contacts') deleteContact.mutate({ id: row.id }, { onSuccess, onError });
     if (entity === 'companies') deleteCompany.mutate({ id: row.id }, { onSuccess, onError });
@@ -986,68 +1049,665 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     });
     const meta = resourceTitle[entity];
     const stageOptions = entity === 'deals' ? ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] : entity === 'tasks' ? ['Open', 'In progress', 'Completed'] : [];
-    return <><PageHeader title={meta.title} description={meta.description} action={<Btn onClick={() => setModal({ entity })}><Plus size={15} /> Add {meta.singular}</Btn>} />{notices}<Card>
-      {entity === 'tasks' && (
-        <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0ee] bg-[#fbfcfb] px-4 py-2.5">
-          <span className="text-[11px] font-bold uppercase tracking-wider text-[#798882]">Filter Tasks:</span>
-          <button
-            type="button"
-            onClick={() => setTaskTab('all')}
-            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'all' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
-          >
-            All Tasks ({rows.length})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTaskTab('remaining')}
-            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'remaining' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
-          >
-            Remaining Tasks ({remainingTasksCount})
-          </button>
-          <button
-            type="button"
-            onClick={() => setTaskTab('completed')}
-            className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'completed' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
-          >
-            Completed ({completedTasksCount})
-          </button>
-        </div>
-      )}
-      <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] px-4 py-3"><div className="relative min-w-[220px] flex-1 sm:max-w-[360px]"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid={`input-search-${entity}`} value={search} onChange={e => setSearch(e.target.value)} placeholder={`Search ${entity}…`} className="w-full rounded-lg border border-[#e5ebe7] bg-[#fbfcfb] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#9fc5ac]" /></div><div className="flex items-center gap-2"><Badge>{filtered.length} records</Badge><Btn kind={filteredOnly ? 'soft' : 'ghost'} onClick={() => setFilteredOnly(v => !v)} className="px-2.5"><Filter size={14} /> {filteredOnly ? 'Active only' : 'Filter active'}</Btn></div></div>{query.isLoading ? <LoadingRows /> : query.isError ? <Empty title="Couldn’t load records" detail="The data service is unavailable right now. Retry when your connection is ready." button={<Btn kind="outline" onClick={() => query.refetch()}><RotateCw size={14} /> Retry</Btn>} /> : filtered.length === 0 ? <Empty title={q ? 'No matching records' : `No ${entity} yet`} detail={q ? 'Try a different name or search term.' : `Add your first ${meta.singular} and start building a useful picture of your relationships.`} button={!q && <Btn onClick={() => setModal({ entity })}><Plus size={14} /> Add {meta.singular}</Btn>} /> :
-      <Table headers={entity === 'contacts' ? ['Name', 'Company', 'Relationship', 'Owner', 'Added', ''] : entity === 'companies' ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', ''] : entity === 'deals' ? ['Opportunity', 'Company', 'Stage', 'Close date', 'Owner', ''] : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']}>
-        {filtered.map(r => <tr key={r.id} data-testid={`row-${entity}-${r.id}`} className="group transition hover:bg-[#fafcfb]">
-          {entity === 'contacts' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><Avatar name={r.name} size="sm" /><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.email || r.role || '—'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.createdAt)}</td></>}
-          {entity === 'companies' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0f3f1] text-[#62716b]"><Building2 size={15} /></span><div><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.website || 'No website'}</p></div></div></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.industry || '—'}</td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.size || '—'}</td><td className="px-4 py-3"><ToneStatus value={r.status} /></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
-          {entity === 'deals' && <><td className="px-5 py-3"><p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No contact'}</p></td><td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td><td className="px-4 py-3"><select aria-label={`Change ${r.name} stage`} data-testid={`select-stage-${r.id}`} value={r.stage || 'Discovery'} onChange={e => updateDeal.mutate({ id: r.id, data: { stage: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListDealsQueryKey() }); setNotice({ tone: 'good', text: 'Deal stage updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update deal stage.' }) })} className="rounded-md border-0 bg-transparent p-0 text-[11px] outline-none"><option>{r.stage}</option>{stageOptions.filter(x => x !== r.stage).map(x => <option key={x}>{x}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.expectedClose)}</td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
-          {entity === 'tasks' && <><td className="px-5 py-3"><div className="flex items-center gap-2.5"><button type="button" title={/complete/i.test(r.status || '') ? 'Mark as Open' : 'Mark as Completed'} onClick={() => { const nextStatus = /complete/i.test(r.status || '') ? 'Open' : 'Completed'; updateTask.mutate({ id: r.id, data: { status: nextStatus } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${r.title}" marked as ${nextStatus}.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) }); }} className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${/complete/i.test(r.status || '') ? 'border-[#30815f] bg-[#eaf4ef] text-[#28785b]' : 'border-[#d4dfd8] bg-white text-transparent hover:border-[#28785b] hover:text-[#28785b]/60'}`}><Check size={13} strokeWidth={2.5} /></button><div><p className={`text-[12px] font-semibold ${/complete/i.test(r.status) ? 'text-[#9aa49f] line-through' : 'text-[#33413d]'}`}>{r.title}</p><p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No linked contact'}</p></div></div></td><td className="px-4 py-3 text-[11px] text-[#64716d]">{r.type || '—'}</td><td className="px-4 py-3 text-[11px] text-[#64716d]">{dateLabel(r.dueDate)}</td><td className="px-4 py-3"><Badge tone={r.priority === 'High' ? 'red' : r.priority === 'Medium' ? 'amber' : 'neutral'}>{r.priority || 'Normal'}</Badge></td><td className="px-4 py-3"><select aria-label={`Change ${r.title} status`} data-testid={`select-task-status-${r.id}`} value={r.status || 'Open'} onChange={e => updateTask.mutate({ id: r.id, data: { status: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: 'Task status updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task status.' }) })} className="rounded-md border border-[#e1e8e4] bg-[#fafbfa] px-2 py-1 text-[11px] font-medium text-[#384842] outline-none">{['Open', 'In progress', 'Completed'].map(v => <option key={v}>{v}</option>)}</select></td><td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td></>}
-          <td className="px-3 py-3"><div className="flex justify-end gap-1 opacity-60 transition group-hover:opacity-100"><IconBtn icon={Pencil} onClick={() => setModal({ entity, row: r })} title="Edit record" /><IconBtn icon={Trash2} onClick={() => removeResource(entity, r)} title="Delete record" /></div></td>
-        </tr>)}
-      </Table>}</Card></>;
+
+    const dealColumns = [
+      { stage: 'Lead', border: 'border-blue-200', bg: 'bg-blue-50/40', badge: 'bg-blue-100 text-blue-800' },
+      { stage: 'Qualified', border: 'border-indigo-200', bg: 'bg-indigo-50/40', badge: 'bg-indigo-100 text-indigo-800' },
+      { stage: 'Proposal', border: 'border-amber-200', bg: 'bg-amber-50/40', badge: 'bg-amber-100 text-amber-800' },
+      { stage: 'Negotiation', border: 'border-orange-200', bg: 'bg-orange-50/40', badge: 'bg-orange-100 text-orange-800' },
+      { stage: 'Won', border: 'border-emerald-200', bg: 'bg-emerald-50/40', badge: 'bg-emerald-100 text-emerald-800' },
+      { stage: 'Lost', border: 'border-rose-200', bg: 'bg-rose-50/40', badge: 'bg-rose-100 text-rose-800' },
+    ];
+
+    return (
+      <>
+        <PageHeader
+          title={meta.title}
+          description={meta.description}
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn kind="outline" onClick={() => exportToCsv(filtered, entity)} title={`Export ${meta.title} to CSV`}>
+                <Download size={13} /> Export CSV
+              </Btn>
+              <Btn onClick={() => setModal({ entity })}>
+                <Plus size={15} /> Add {meta.singular}
+              </Btn>
+            </div>
+          }
+        />
+        {notices}
+        <Card>
+          {entity === 'tasks' && (
+            <div className="flex flex-wrap items-center gap-2 border-b border-[#edf0ee] bg-[#fbfcfb] px-4 py-2.5">
+              <span className="text-[11px] font-bold uppercase tracking-wider text-[#798882]">Filter Tasks:</span>
+              <button
+                type="button"
+                onClick={() => setTaskTab('all')}
+                className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'all' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+              >
+                All Tasks ({rows.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTaskTab('remaining')}
+                className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'remaining' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+              >
+                Remaining Tasks ({remainingTasksCount})
+              </button>
+              <button
+                type="button"
+                onClick={() => setTaskTab('completed')}
+                className={`rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${taskTab === 'completed' ? 'bg-[#28785b] text-white shadow-sm' : 'border border-[#dbe4df] bg-white text-[#495953] hover:bg-[#edf4f0]'}`}
+              >
+                Completed ({completedTasksCount})
+              </button>
+            </div>
+          )}
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] px-4 py-3">
+            <div className="relative min-w-[220px] flex-1 sm:max-w-[360px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" />
+              <input
+                data-testid={`input-search-${entity}`}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder={`Search ${entity}…`}
+                className="w-full rounded-lg border border-[#e5ebe7] bg-[#fbfcfb] py-2 pl-9 pr-3 text-[12px] outline-none focus:border-[#9fc5ac]"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              {entity === 'deals' && (
+                <div className="flex items-center rounded-lg border border-[#dce5e0] bg-[#f2f6f4] p-0.5">
+                  <button
+                    type="button"
+                    onClick={() => setDealView('kanban')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${dealView === 'kanban' ? 'bg-white text-[#28785b] shadow-sm' : 'text-[#64746e] hover:text-[#28785b]'}`}
+                  >
+                    <Kanban size={13} /> Board
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDealView('list')}
+                    className={`flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[11px] font-semibold transition ${dealView === 'list' ? 'bg-white text-[#28785b] shadow-sm' : 'text-[#64746e] hover:text-[#28785b]'}`}
+                  >
+                    <List size={13} /> Table
+                  </button>
+                </div>
+              )}
+              <Badge>{filtered.length} records</Badge>
+              <Btn kind={filteredOnly ? 'soft' : 'ghost'} onClick={() => setFilteredOnly(v => !v)} className="px-2.5">
+                <Filter size={14} /> {filteredOnly ? 'Active only' : 'Filter active'}
+              </Btn>
+            </div>
+          </div>
+          {query.isLoading ? (
+            <LoadingRows />
+          ) : query.isError ? (
+            <Empty
+              title="Couldn’t load records"
+              detail="The data service is unavailable right now. Retry when your connection is ready."
+              button={<Btn kind="outline" onClick={() => query.refetch()}><RotateCw size={14} /> Retry</Btn>}
+            />
+          ) : filtered.length === 0 ? (
+            <Empty
+              title={q ? 'No matching records' : `No ${entity} yet`}
+              detail={q ? 'Try a different name or search term.' : `Add your first ${meta.singular} and start building a useful picture of your relationships.`}
+              button={!q && <Btn onClick={() => setModal({ entity })}><Plus size={14} /> Add {meta.singular}</Btn>}
+            />
+          ) : entity === 'deals' && dealView === 'kanban' ? (
+            <div className="overflow-x-auto p-4 bg-[#f8faf9]">
+              <div className="flex gap-4 min-w-[1200px] items-start">
+                {dealColumns.map(col => {
+                  const colDeals = filtered.filter(d => (d.stage || 'Lead') === col.stage);
+                  const colTotal = colDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
+                  return (
+                    <div key={col.stage} className={`flex-1 rounded-xl border ${col.border} ${col.bg} p-3 flex flex-col min-w-[240px] max-w-[300px]`}>
+                      <div className="flex items-center justify-between pb-2.5 mb-2 border-b border-black/5">
+                        <div className="flex items-center gap-1.5">
+                          <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${col.badge}`}>{col.stage}</span>
+                          <span className="text-[11px] font-semibold text-[#6a7a74]">({colDeals.length})</span>
+                        </div>
+                        <span className="text-[11px] font-mono font-bold text-[#2e3e38]">{currency(colTotal)}</span>
+                      </div>
+                      <div className="space-y-2.5 flex-1 min-h-[140px]">
+                        {colDeals.length === 0 ? (
+                          <div className="h-28 rounded-lg border border-dashed border-[#d2dcd6] flex flex-col items-center justify-center text-center p-3 text-[11px] text-[#8e9c96]">
+                            <span>No deals in this stage</span>
+                            <button
+                              type="button"
+                              onClick={() => setModal({ entity: 'deals', row: { stage: col.stage } })}
+                              className="mt-1 text-[10px] font-semibold text-[#28785b] hover:underline"
+                            >
+                              + Add to {col.stage}
+                            </button>
+                          </div>
+                        ) : (
+                          colDeals.map(deal => (
+                            <div key={deal.id} className="rounded-lg border border-[#e1e8e4] bg-white p-3 shadow-sm hover:border-[#9ec4af] hover:shadow transition group">
+                              <div className="flex items-start justify-between gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() => setModal({ entity: 'deals', row: deal })}
+                                  className="text-left font-semibold text-[12px] text-[#2c3a35] hover:text-[#28785b] line-clamp-1"
+                                  title={deal.name}
+                                >
+                                  {deal.name}
+                                </button>
+                                <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition">
+                                  <IconBtn icon={Pencil} onClick={() => setModal({ entity: 'deals', row: deal })} title="Edit" />
+                                  <IconBtn icon={Trash2} onClick={() => removeResource('deals', deal)} title="Delete" />
+                                </div>
+                              </div>
+                              <div className="mt-1.5 flex items-baseline justify-between">
+                                <span className="text-[14px] font-extrabold text-[#23352f]">{currency(deal.value)}</span>
+                                {deal.probability ? (
+                                  <span className="text-[10px] font-semibold text-[#546b62] bg-[#f0f5f2] px-1.5 py-0.5 rounded">{deal.probability}% win</span>
+                                ) : null}
+                              </div>
+                              {deal.company && (
+                                <p className="mt-1 flex items-center gap-1 text-[11px] text-[#5b6a65] truncate">
+                                  <Building2 size={12} className="shrink-0 text-[#8e9c97]" />
+                                  <span className="truncate">{deal.company}</span>
+                                </p>
+                              )}
+                              <div className="mt-2 flex items-center justify-between text-[10px] text-[#84928d] border-t border-[#f0f3f1] pt-2">
+                                <span className="flex items-center gap-1 truncate">
+                                  <Avatar name={deal.owner || 'U'} size="sm" />
+                                  <span className="truncate">{deal.owner || 'Unassigned'}</span>
+                                </span>
+                                {deal.expectedClose && <span>{dateLabel(deal.expectedClose)}</span>}
+                              </div>
+                              <div className="mt-2.5 flex items-center justify-between gap-1 border-t border-[#f2f5f3] pt-2">
+                                {nextStageMap[deal.stage] ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => moveDealStage(deal, nextStageMap[deal.stage])}
+                                    className="flex items-center gap-1 rounded bg-[#eaf4ed] px-2 py-1 text-[10px] font-bold text-[#28785b] hover:bg-[#d9ece0] transition"
+                                  >
+                                    → {nextStageMap[deal.stage]}
+                                  </button>
+                                ) : (
+                                  <span />
+                                )}
+                                <div className="flex items-center gap-1">
+                                  {deal.stage !== 'Won' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => moveDealStage(deal, 'Won')}
+                                      className="rounded bg-emerald-50 px-1.5 py-1 text-[9px] font-bold text-emerald-700 hover:bg-emerald-100 transition"
+                                      title="Mark Won"
+                                    >
+                                      Won
+                                    </button>
+                                  )}
+                                  {deal.stage !== 'Lost' && (
+                                    <button
+                                      type="button"
+                                      onClick={() => moveDealStage(deal, 'Lost')}
+                                      className="rounded bg-rose-50 px-1.5 py-1 text-[9px] font-bold text-rose-700 hover:bg-rose-100 transition"
+                                      title="Mark Lost"
+                                    >
+                                      Lost
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setModal({ entity: 'deals', row: { stage: col.stage } })}
+                        className="mt-2.5 flex items-center justify-center gap-1 rounded-lg border border-transparent py-1.5 text-[11px] font-semibold text-[#54655f] hover:border-[#ccd7d1] hover:bg-white/80 transition"
+                      >
+                        <Plus size={12} /> Add Deal
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : (
+            <Table
+              headers={
+                entity === 'contacts'
+                  ? ['Name', 'Company', 'Relationship', 'Owner', 'Added', '']
+                  : entity === 'companies'
+                  ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', '']
+                  : entity === 'deals'
+                  ? ['Opportunity', 'Company', 'Deal Value', 'Stage', 'Close date', 'Owner', '']
+                  : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']
+              }
+            >
+              {filtered.map(r => (
+                <tr key={r.id} data-testid={`row-${entity}-${r.id}`} className="group transition hover:bg-[#fafcfb]">
+                  {entity === 'contacts' && (
+                    <>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <Avatar name={r.name} size="sm" />
+                          <div>
+                            <p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p>
+                            <p className="mt-0.5 text-[10px] text-[#84908c]">{r.email || r.role || '—'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td>
+                      <td className="px-4 py-3"><ToneStatus value={r.status} /></td>
+                      <td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td>
+                      <td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.createdAt)}</td>
+                    </>
+                  )}
+                  {entity === 'companies' && (
+                    <>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#f0f3f1] text-[#62716b]">
+                            <Building2 size={15} />
+                          </span>
+                          <div>
+                            <p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p>
+                            <p className="mt-0.5 text-[10px] text-[#84908c]">{r.website || 'No website'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.industry || '—'}</td>
+                      <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.size || '—'}</td>
+                      <td className="px-4 py-3"><ToneStatus value={r.status} /></td>
+                      <td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td>
+                    </>
+                  )}
+                  {entity === 'deals' && (
+                    <>
+                      <td className="px-5 py-3">
+                        <p className="text-[12px] font-semibold text-[#33413d]">{r.name}</p>
+                        <p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No contact'}</p>
+                      </td>
+                      <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td>
+                      <td className="px-4 py-3 text-[12px] font-bold text-[#273932]">{currency(r.value)}</td>
+                      <td className="px-4 py-3">
+                        <select
+                          aria-label={`Change ${r.name} stage`}
+                          data-testid={`select-stage-${r.id}`}
+                          value={r.stage || 'Lead'}
+                          onChange={e => updateDeal.mutate({ id: r.id, data: { stage: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListDealsQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); qc.invalidateQueries({ queryKey: getGetAnalyticsQueryKey() }); setNotice({ tone: 'good', text: 'Deal stage updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update deal stage.' }) })}
+                          className="rounded-md border border-[#dde4e0] bg-white px-2 py-1 text-[11px] font-medium text-[#384842] outline-none"
+                        >
+                          {stageOptions.map(x => <option key={x} value={x}>{x}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.expectedClose)}</td>
+                      <td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td>
+                    </>
+                  )}
+                  {entity === 'tasks' && (
+                    <>
+                      <td className="px-5 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <button
+                            type="button"
+                            title={/complete/i.test(r.status || '') ? 'Mark as Open' : 'Mark as Completed'}
+                            onClick={() => {
+                              const nextStatus = /complete/i.test(r.status || '') ? 'Open' : 'Completed';
+                              updateTask.mutate({ id: r.id, data: { status: nextStatus } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${r.title}" marked as ${nextStatus}.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) });
+                            }}
+                            className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md border transition ${/complete/i.test(r.status || '') ? 'border-[#30815f] bg-[#eaf4ef] text-[#28785b]' : 'border-[#d4dfd8] bg-white text-transparent hover:border-[#28785b] hover:text-[#28785b]/60'}`}
+                          >
+                            <Check size={13} strokeWidth={2.5} />
+                          </button>
+                          <div>
+                            <p className={`text-[12px] font-semibold ${/complete/i.test(r.status) ? 'text-[#9aa49f] line-through' : 'text-[#33413d]'}`}>{r.title}</p>
+                            <p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No linked contact'}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-[#64716d]">{r.type || '—'}</td>
+                      <td className="px-4 py-3 text-[11px] text-[#64716d]">{dateLabel(r.dueDate)}</td>
+                      <td className="px-4 py-3">
+                        <Badge tone={r.priority === 'Urgent' || r.priority === 'High' ? 'red' : r.priority === 'Medium' ? 'amber' : 'neutral'}>
+                          {r.priority || 'Normal'}
+                        </Badge>
+                      </td>
+                      <td className="px-4 py-3">
+                        <select
+                          aria-label={`Change ${r.title} status`}
+                          data-testid={`select-task-status-${r.id}`}
+                          value={r.status || 'Open'}
+                          onChange={e => updateTask.mutate({ id: r.id, data: { status: e.target.value } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: 'Task status updated.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task status.' }) })}
+                          className="rounded-md border border-[#e1e8e4] bg-[#fafbfa] px-2 py-1 text-[11px] font-medium text-[#384842] outline-none"
+                        >
+                          {['Open', 'In progress', 'Completed'].map(v => <option key={v} value={v}>{v}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td>
+                    </>
+                  )}
+                  <td className="px-3 py-3">
+                    <div className="flex justify-end gap-1 opacity-60 transition group-hover:opacity-100">
+                      <IconBtn icon={Pencil} onClick={() => setModal({ entity, row: r })} title="Edit record" />
+                      <IconBtn icon={Trash2} onClick={() => removeResource(entity, r)} title="Delete record" />
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </Table>
+          )}
+        </Card>
+      </>
+    );
   }
 
   function Dashboard() {
-    const d: any = dash.data; const a: AnyRecord[] = (activity.data as AnyRecord[]) || [];
+    const d: any = dash.data;
+    const an: any = analytics.data;
+    const a: AnyRecord[] = (activity.data as AnyRecord[]) || [];
     const allTasksList = (tasks.data as AnyRecord[]) || [];
+    const allDealsList = (deals.data as AnyRecord[]) || [];
     const remainingTasks = allTasksList.filter(t => !/complete/i.test(t.status || ''));
     const completedTasks = allTasksList.filter(t => /complete/i.test(t.status || ''));
-    const topTasks = [...remainingTasks, ...completedTasks].slice(0, 5);
-    return <><PageHeader title={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${(member.name || '').split(' ')[0] || 'there'}`} description="Here’s what’s happening across your relationships today." action={<Btn onClick={() => setModal({ entity: 'deals' })}><Plus size={15} /> New deal</Btn>} />{notices}
-      {dash.isLoading ? <div className="grid gap-3 sm:grid-cols-3">{[1,2,3].map(i => <div key={i} className="h-28 animate-pulse rounded-xl bg-white" />)}</div> : dash.isError ? <Card><Empty title="Dashboard is taking a pause" detail="We couldn’t load your workspace summary." button={<Btn kind="outline" onClick={() => dash.refetch()}><RotateCw size={14} /> Retry</Btn>} /></Card> : <div className="grid gap-3 sm:grid-cols-3"><Metric label="Active opportunities" value={String(d?.openDeals ?? 0)} note="Deals currently in progress" icon={BriefcaseBusiness} onClick={() => setLocation('/deals')} /><Metric label="Contacts" value={String(d?.contacts ?? 0)} note="People in your network" icon={ContactRound} onClick={() => setLocation('/contacts')} /><Metric label="Follow-ups due" value={String(d?.tasksDue ?? 0)} note={`${remainingTasks.length} tasks remaining`} icon={CalendarDays} onClick={() => setLocation('/tasks')} /></div>}
-      <div className="mt-5 grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardTitle title="Pipeline by stage" detail="Opportunities by current stage" right={<Link href="/deals" className="text-[11px] font-semibold text-[#43815f]">View deals <ArrowRight size={12} className="inline" /></Link>} />
-          {d?.stageBreakdown?.length ? <div className="space-y-4 p-5">{d.stageBreakdown.map((s: AnyRecord, i: number) => <div key={s.stage}><div className="mb-1.5 flex items-center justify-between"><span className="text-[11px] font-semibold text-[#53615c]">{s.stage}</span><span className="font-mono text-[10px] text-[#89948f]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#eff2f0]"><div className="h-full rounded-full bg-[#599570]" style={{ width: s.count > 0 ? `${Math.max(6, Math.min(100, (s.count / Math.max(...d.stageBreakdown.map((x: AnyRecord) => x.count), 1)) * 100))}%` : '0%', opacity: 1 - i * .09 }} /></div></div>)}</div> : <Empty title="No active pipeline" detail="Create an opportunity to see momentum by stage." button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>} />}
+    const todayStr = new Date().toISOString().slice(0, 10);
+    const overdueTasks = remainingTasks.filter(t => t.dueDate && t.dueDate < todayStr);
+    const topTasks = [...remainingTasks, ...completedTasks].slice(0, 6);
+
+    const monthlyRev: Array<{ month: string; amount: number }> = d?.monthlyRevenue || an?.monthlyRevenue || [];
+    const maxRev = Math.max(...monthlyRev.map(m => m.amount), 1);
+    const stageFunnel: Array<{ stage: string; count: number; value: number }> = d?.stageBreakdown || an?.stageBreakdown || [];
+    const maxFunnelCount = Math.max(...stageFunnel.map(s => s.count), 1);
+    const ownersList: Array<{ owner: string; count: number; value: number }> = an?.ownerBreakdown || [];
+    const sortedOwners = [...ownersList].sort((x, y) => y.value - x.value);
+
+    return (
+      <>
+        <PageHeader
+          title={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${(member.name || '').split(' ')[0] || 'there'}`}
+          description="Executive overview of your pipeline, revenue velocity, and high-priority relationship follow-ups."
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <Btn kind="outline" onClick={() => exportToCsv(allDealsList, 'deals-pipeline')} title="Export deals CSV">
+                <Download size={13} /> Export Deals
+              </Btn>
+              <Btn onClick={() => setModal({ entity: 'deals' })}>
+                <Plus size={15} /> New deal
+              </Btn>
+            </div>
+          }
+        />
+        {notices}
+
+        {/* Frappe CRM Quick Action Ribbon */}
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#e2e8e4] bg-white p-2.5 shadow-sm">
+          <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-[#798882]">Quick Actions:</span>
+          <button
+            type="button"
+            onClick={() => setModal({ entity: 'deals' })}
+            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
+          >
+            <Plus size={13} className="text-[#28785b]" /> Deal
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ entity: 'contacts' })}
+            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
+          >
+            <ContactRound size={13} className="text-[#3b7e5b]" /> Contact
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ entity: 'tasks' })}
+            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
+          >
+            <CalendarDays size={13} className="text-[#967b36]" /> Follow-up
+          </button>
+          <button
+            type="button"
+            onClick={() => setModal({ entity: 'companies' })}
+            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
+          >
+            <Building2 size={13} className="text-[#4b6a82]" /> Company
+          </button>
+          <div className="ml-auto hidden sm:flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => { setDealView('kanban'); setLocation('/deals'); }}
+              className="flex items-center gap-1.5 rounded-lg bg-[#28785b]/10 px-3 py-1.5 text-[11px] font-bold text-[#28785b] transition hover:bg-[#28785b]/20"
+            >
+              <Kanban size={13} /> Pipeline Board →
+            </button>
+          </div>
+        </div>
+
+        {dash.isLoading ? (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            {[1, 2, 3, 4, 5].map(i => (
+              <div key={i} className="h-28 animate-pulse rounded-xl bg-white" />
+            ))}
+          </div>
+        ) : dash.isError ? (
+          <Card>
+            <Empty
+              title="Dashboard is taking a pause"
+              detail="We couldn’t load your workspace summary."
+              button={<Btn kind="outline" onClick={() => dash.refetch()}><RotateCw size={14} /> Retry</Btn>}
+            />
+          </Card>
+        ) : (
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Metric
+              label="Active Pipeline"
+              value={currency(d?.pipelineValue ?? an?.pipelineValue ?? 0)}
+              note={`${d?.openDeals ?? 0} active deals`}
+              icon={DollarSign}
+              onClick={() => { setDealView('kanban'); setLocation('/deals'); }}
+            />
+            <Metric
+              label="Won This Month"
+              value={currency(d?.wonThisMonth ?? 0)}
+              note={`Win Rate: ${Math.round(an?.conversionRate ?? 0)}%`}
+              icon={Trophy}
+            />
+            <Metric
+              label="Total Won Pipeline"
+              value={currency(an?.wonValue ?? 0)}
+              note={`Avg Deal: ${currency(an?.averageDealSize ?? 0)}`}
+              icon={TrendingUp}
+            />
+            <Metric
+              label="Follow-ups Due"
+              value={String(d?.tasksDue ?? 0)}
+              note={overdueTasks.length ? `${overdueTasks.length} overdue · ${remainingTasks.length} pending` : `${remainingTasks.length} tasks remaining`}
+              icon={CalendarDays}
+              onClick={() => setLocation('/tasks')}
+            />
+            <Metric
+              label="Network Reach"
+              value={String(d?.contacts ?? 0)}
+              note={`${(companies.data as AnyRecord[] || []).length} companies mapped`}
+              icon={ContactRound}
+              onClick={() => setLocation('/contacts')}
+            />
+          </div>
+        )}
+
+        {/* Funnel & Revenue Charts */}
+        <div className="mt-5 grid gap-4 xl:grid-cols-2">
+          <Card>
+            <CardTitle
+              title="Pipeline Stage Funnel"
+              detail="Deal volume and dollar value across active sales stages"
+              right={
+                <Link href="/deals" className="flex items-center gap-1 text-[11px] font-bold text-[#28785b] hover:underline">
+                  Board <ArrowRight size={12} />
+                </Link>
+              }
+            />
+            {stageFunnel.length ? (
+              <div className="space-y-3.5 p-5">
+                {stageFunnel.map(s => {
+                  const pct = Math.max(6, Math.min(100, (s.count / maxFunnelCount) * 100));
+                  return (
+                    <div key={s.stage} className="rounded-lg border border-[#f0f3f1] bg-[#fafcfb] p-3">
+                      <div className="mb-2 flex items-center justify-between text-[11px]">
+                        <span className="font-bold text-[#32423c]">{s.stage}</span>
+                        <div className="flex items-center gap-3">
+                          <span className="font-semibold text-[#667671]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span>
+                          <span className="font-mono font-bold text-[#28785b]">{currency(s.value)}</span>
+                        </div>
+                      </div>
+                      <div className="h-2 overflow-hidden rounded-full bg-[#e8eee9]">
+                        <div
+                          className="h-full rounded-full bg-gradient-to-r from-[#32845f] to-[#4fa979] transition-all duration-500"
+                          style={{ width: s.count > 0 ? `${pct}%` : '0%' }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty
+                title="No active pipeline"
+                detail="Create an opportunity to visualize momentum across stages."
+                button={<Btn kind="soft" onClick={() => setModal({ entity: 'deals' })}><Plus size={13} /> Add a deal</Btn>}
+              />
+            )}
+          </Card>
+
+          <Card>
+            <CardTitle
+              title="6-Month Revenue Trajectory"
+              detail="Closed-won deals revenue velocity over time"
+              right={<Trophy size={15} className="text-[#b58c38]" />}
+            />
+            <div className="p-5">
+              {monthlyRev.length ? (
+                <div className="flex h-52 items-end justify-between gap-3 pt-6 border-b border-[#edf0ee] pb-3">
+                  {monthlyRev.map((m, idx) => {
+                    const heightPct = Math.max(12, Math.min(100, Math.round((m.amount / maxRev) * 100)));
+                    return (
+                      <div key={idx} className="flex flex-1 flex-col items-center h-full justify-end group">
+                        <span className="mb-1 text-[10px] font-bold text-[#384b43] opacity-80 group-hover:opacity-100 transition truncate max-w-full">
+                          {currency(m.amount)}
+                        </span>
+                        <div className="w-full max-w-[42px] rounded-t-md bg-[#e4ede7] group-hover:bg-[#34835e] transition-all flex items-end justify-center overflow-hidden" style={{ height: `${heightPct}%` }}>
+                          <div className="w-full bg-[#32805d] group-hover:bg-[#256f4d] h-full transition" />
+                        </div>
+                        <span className="mt-2 text-[11px] font-semibold text-[#73847e]">{m.month}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="grid h-48 place-items-center text-center text-[12px] text-[#798882]">
+                  <p>No revenue history yet. Won deals will graph here automatically.</p>
+                </div>
+              )}
+              <div className="mt-3 flex items-center justify-between text-[11px] text-[#788882]">
+                <span>Total Closed Won: <strong className="text-[#2b3d36]">{currency(an?.wonValue ?? 0)}</strong></span>
+                <span>Win Rate: <strong className="text-[#28785b]">{Math.round(an?.conversionRate ?? 0)}%</strong></span>
+              </div>
+            </div>
+          </Card>
+        </div>
+
+        {/* Leaderboard and SLA Queue */}
+        <div className="mt-4 grid gap-4 xl:grid-cols-2">
+          <Card>
+            <CardTitle
+              title="Sales Rep Pipeline Leaderboard"
+              detail="Active opportunity allocation and pipeline volume by team member"
+              right={<Users size={15} className="text-[#788781]" />}
+            />
+            {sortedOwners.length ? (
+              <div className="divide-y divide-[#f0f3f1]">
+                {sortedOwners.map((owner, idx) => (
+                  <div key={owner.owner} className="flex items-center gap-3 px-5 py-3.5 transition hover:bg-[#fafcfb]">
+                    <span className={`flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${idx === 0 ? 'bg-amber-100 text-amber-800' : idx === 1 ? 'bg-slate-200 text-slate-700' : 'bg-[#eef2f0] text-[#63726d]'}`}>
+                      #{idx + 1}
+                    </span>
+                    <Avatar name={owner.owner} size="sm" />
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[12px] font-bold text-[#34443e]">{owner.owner}</p>
+                      <p className="text-[10px] text-[#80908a]">{owner.count} active {owner.count === 1 ? 'deal' : 'deals'}</p>
+                    </div>
+                    <span className="font-mono text-[12px] font-extrabold text-[#28785b]">{currency(owner.value)}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <Empty title="No rep assignments" detail="Assign deals to team members to track leaderboards here." />
+            )}
+          </Card>
+
+          <Card>
+            <CardTitle
+              title="High-Priority Follow-up SLA Queue"
+              detail={`${remainingTasks.length} pending · Prioritize overdue and urgent customer interactions`}
+              right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks ({allTasksList.length}) <ArrowRight size={12} className="inline" /></Link>}
+            />
+            {tasks.isLoading ? (
+              <LoadingRows />
+            ) : topTasks.length ? (
+              <div className="divide-y divide-[#f0f2f1]">
+                {topTasks.map(t => {
+                  const isOverdue = !/complete/i.test(t.status || '') && t.dueDate && t.dueDate < todayStr;
+                  const isDone = /complete/i.test(t.status || '');
+                  return (
+                    <div key={t.id} className="flex items-center gap-3 px-5 py-3 transition hover:bg-[#fafcfb]">
+                      <button
+                        type="button"
+                        title={isDone ? 'Mark open' : 'Mark completed'}
+                        onClick={() => updateTask.mutate({ id: t.id, data: { status: isDone ? 'Open' : 'Completed' } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${t.title}" updated.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) })}
+                        className={`flex h-7 w-7 items-center justify-center rounded-lg border transition ${isDone ? 'border-[#30815f] bg-[#eaf4ee] text-[#28785b]' : 'border-[#d4dfd8] bg-white text-transparent hover:border-[#28785b] hover:text-[#28785b]/60'}`}
+                      >
+                        <Check size={14} strokeWidth={2.5} />
+                      </button>
+                      <button onClick={() => setModal({ entity: 'tasks', row: t })} className="min-w-0 flex-1 text-left">
+                        <div className="flex items-center gap-2">
+                          <p className={`truncate text-[12px] font-semibold ${isDone ? 'text-[#9aa49f] line-through' : 'text-[#384742]'}`}>{t.title}</p>
+                          {isOverdue && <span className="rounded bg-rose-100 px-1.5 py-0.5 text-[9px] font-extrabold uppercase text-rose-800">Overdue</span>}
+                        </div>
+                        <p className="mt-0.5 text-[10px] text-[#84928d]">
+                          {t.type || 'Follow-up'} {t.contact ? `· ${t.contact}` : ''} · Due {dateLabel(t.dueDate)}
+                        </p>
+                      </button>
+                      <Badge tone={t.priority === 'Urgent' || t.priority === 'High' ? 'red' : t.priority === 'Medium' ? 'amber' : 'neutral'}>
+                        {t.priority || 'Normal'}
+                      </Badge>
+                      <button onClick={() => setModal({ entity: 'tasks', row: t })}><ToneStatus value={t.status} /></button>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <Empty title="All caught up!" detail="Add a follow-up task so no deal drops off." button={<Btn kind="soft" onClick={() => setModal({ entity: 'tasks' })}><Plus size={13} /> Add task</Btn>} />
+            )}
+          </Card>
+        </div>
+
+        {/* Activity Feed */}
+        <Card className="mt-4">
+          <CardTitle title="Recent Workspace Activity" detail="The latest movements from your team across deals, tasks, and contacts" right={<ActivityIcon size={15} className="text-[#87938e]" />} />
+          {activity.isLoading ? (
+            <LoadingRows />
+          ) : a.length ? (
+            <div className="divide-y divide-[#f0f2f1]">
+              {a.slice(0, 6).map(item => (
+                <div key={item.id} data-testid={`activity-${item.id}`} className="flex items-center gap-3 px-5 py-3.5">
+                  <Avatar name={item.kind || item.title} size="sm" />
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-[12px] font-semibold text-[#3a4843]">{item.title}</p>
+                    <p className="mt-0.5 truncate text-[10px] text-[#87928e]">{item.detail}</p>
+                  </div>
+                  <span className="whitespace-nowrap text-[10px] text-[#98a29e]">{dateLabel(item.createdAt)}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <Empty title="A fresh start" detail="Team updates, new records, and deal movement will show here." />
+          )}
         </Card>
-        <Card>
-          <CardTitle title="Today’s follow-ups" detail={`${remainingTasks.length} tasks remaining · Make the next conversation count`} right={<Link href="/tasks" className="text-[11px] font-semibold text-[#43815f]">All tasks ({allTasksList.length}) <ArrowRight size={12} className="inline" /></Link>} />
-          {tasks.isLoading ? <LoadingRows /> : topTasks.length ? <div className="divide-y divide-[#f0f2f1]">{topTasks.map(t => <div key={t.id} className="flex items-center gap-3 px-5 py-3 transition hover:bg-[#fafcfb]"><button title={t.status === 'Completed' ? 'Mark open' : 'Mark completed'} onClick={() => updateTask.mutate({ id: t.id, data: { status: t.status === 'Completed' ? 'Open' : 'Completed' } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListTasksQueryKey() }); qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() }); setNotice({ tone: 'good', text: `Task "${t.title}" updated.` }); }, onError: () => setNotice({ tone: 'bad', text: 'Could not update task.' }) })} className={`flex h-7 w-7 items-center justify-center rounded-lg transition ${t.status === 'Completed' ? 'bg-[#eaf4ee] text-[#28785b]' : 'bg-[#f5f2e9] text-[#9b8146] hover:bg-[#eae3d2]'}`}><Check size={14} /></button><button onClick={() => setModal({ entity: 'tasks', row: t })} className="min-w-0 flex-1 text-left"><p className={`truncate text-[11px] font-semibold ${t.status === 'Completed' ? 'text-[#9aa49f] line-through' : 'text-[#46534e]'}`}>{t.title}</p><p className="mt-0.5 text-[10px] text-[#89948f]">{t.contact || t.type || 'Follow-up'} · {dateLabel(t.dueDate)}</p></button><button onClick={() => setModal({ entity: 'tasks', row: t })}><ToneStatus value={t.status} /></button></div>)}</div> : <Empty title="Nothing on the list yet" detail="Add a follow-up so no relationship goes quiet." button={<Btn kind="soft" onClick={() => setModal({ entity: 'tasks' })}><Plus size={13} /> Add task</Btn>} />}
-        </Card>
-      </div>
-      <Card className="mt-4">
-        <CardTitle title="Recent activity" detail="The latest movement from your team" right={<ActivityIcon size={15} className="text-[#87938e]" />} />
-        {activity.isLoading ? <LoadingRows /> : a.length ? <div className="divide-y divide-[#f0f2f1]">{a.slice(0, 6).map((item, i) => <div key={item.id} data-testid={`activity-${item.id}`} className="flex items-center gap-3 px-5 py-3.5"><Avatar name={item.kind || item.title} size="sm" /><div className="min-w-0 flex-1"><p className="truncate text-[11px] font-semibold text-[#47554f]">{item.title}</p><p className="mt-0.5 truncate text-[10px] text-[#87928e]">{item.detail}</p></div><span className="whitespace-nowrap text-[9px] text-[#98a29e]">{dateLabel(item.createdAt)}</span></div>)}</div> : <Empty title="A fresh start" detail="Team updates, new records, and deal movement will show here." />}
-      </Card>
-    </>;
+      </>
+    );
   }
   function Team() {
     const team: AnyRecord[] = ((members.data || []) as AnyRecord[]).filter(m => m.role !== 'super_admin');
