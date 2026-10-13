@@ -111,7 +111,7 @@ router.post("/superadmin/companies", async (req, res): Promise<void> => {
       .returning();
   }
 
-  await addActivity("company", "New company workspace created & Admin assigned", `${name} (${adminEmail})`);
+  await addActivity("superadmin", "New company workspace created & Admin assigned", `${name} (${adminEmail})`);
 
   res.status(201).json({
     company: {
@@ -147,7 +147,7 @@ router.put("/superadmin/companies/:id/initiation-code", async (req, res): Promis
     return;
   }
 
-  await addActivity("company", "Company initiation code updated", `${company.name} -> ${initiationCode}`);
+  await addActivity("superadmin", "Company initiation code updated", `${company.name} -> ${initiationCode}`);
 
   res.json({ company: { ...company, createdAt: asIso(company.createdAt) } });
 });
@@ -182,7 +182,7 @@ router.post("/superadmin/companies/:id/reset-admin-password", async (req, res): 
     .set({ passwordHash: hashPassword(newPassword) })
     .where(eq(teamMembersTable.id, admin.id));
 
-  await addActivity("team", "Admin password reset", admin.email);
+  await addActivity("superadmin", "Admin password reset", admin.email);
 
   res.json({ ok: true, message: `Password reset successfully for ${admin.email}` });
 });
@@ -208,7 +208,7 @@ router.delete("/superadmin/companies/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  await addActivity("company", "Company workspace deleted", deletedCompany.name);
+  await addActivity("superadmin", "Company workspace deleted", deletedCompany.name);
 
   res.status(204).end();
 });
@@ -281,7 +281,7 @@ router.patch("/superadmin/users/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  await addActivity("team", `Updated access for ${updated.name}`, `${updated.email} (${updated.role}, ${updated.status})`);
+  await addActivity("superadmin", `Updated access for ${updated.name}`, `${updated.email} (${updated.role}, ${updated.status})`);
   res.json({ ok: true, member: updated });
 });
 
@@ -298,7 +298,7 @@ router.delete("/superadmin/users/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  await addActivity("team", `Removed user access`, deleted.email);
+  await addActivity("superadmin", `Removed user access`, deleted.email);
   res.status(204).end();
 });
 
@@ -365,7 +365,7 @@ router.post("/superadmin/requests/:id/approve-admin", async (req, res): Promise<
     .where(eq(teamMembersTable.id, id))
     .returning();
 
-  await addActivity("team", "Approved user as Workspace Admin", updated.email);
+  await addActivity("superadmin", "Approved user as Workspace Admin", updated.email);
   res.json({ ok: true, member: updated });
 });
 
@@ -382,7 +382,7 @@ router.post("/superadmin/requests/:id/approve-employee", async (req, res): Promi
     res.status(404).json({ error: "Request not found" });
     return;
   }
-  await addActivity("team", "Approved user as Employee", updated.email);
+  await addActivity("superadmin", "Approved user as Employee", updated.email);
   res.json({ ok: true, member: updated });
 });
 
@@ -399,7 +399,7 @@ router.post("/superadmin/requests/:id/reject", async (req, res): Promise<void> =
     res.status(404).json({ error: "Request not found" });
     return;
   }
-  await addActivity("team", "Rejected user access", updated.email);
+  await addActivity("superadmin", "Rejected user access", updated.email);
   res.json({ ok: true, member: updated });
 });
 
@@ -451,7 +451,7 @@ router.post("/superadmin/assign-admin", async (req, res): Promise<void> => {
       .where(eq(teamMembersTable.id, existing.id))
       .returning();
 
-    await addActivity("team", "Assigned user as Admin", email);
+    await addActivity("superadmin", "Assigned user as Admin", email);
     res.json({ ok: true, member: updated });
     return;
   }
@@ -468,7 +468,7 @@ router.post("/superadmin/assign-admin", async (req, res): Promise<void> => {
     })
     .returning();
 
-  await addActivity("team", "Pre-assigned email as Admin", email);
+  await addActivity("superadmin", "Pre-assigned email as Admin", email);
   res.status(201).json({ ok: true, member: created });
 });
 

@@ -4,11 +4,11 @@ import { Route, Switch, Redirect, Router as WouterRouter, Link, useLocation } fr
 import { ClerkProvider, SignIn as ClerkSignIn, SignUp as ClerkSignUp, useUser } from '@clerk/clerk-react';
 import {
   Activity as ActivityIcon, ArrowUpRight, Bell, BriefcaseBusiness, Building2, CalendarDays,
-  Check, CheckCheck, ChevronDown, ChevronRight, Clock3, Compass,
+  Check, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, Clock3, Compass,
   ContactRound, Ellipsis, Filter, Inbox, LayoutDashboard, LogOut, MessageCircle, Plus, Search,
   Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
   Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText,
-  ShieldAlert, KeyRound, AlertCircle, UserCheck, Download, Kanban, List, Trophy, DollarSign, Layers,
+  ShieldAlert, KeyRound, AlertCircle, UserCheck, Download, Kanban, List, Trophy, Layers,
   Phone, Video, FileSpreadsheet
 } from 'lucide-react';
 import {
@@ -495,11 +495,10 @@ const fields: Record<string, Field[]> = {
   ],
   deals: [
     { key: 'name', label: 'Deal name', required: true },
-    { key: 'value', label: 'Deal Value ($)', type: 'number', required: true, placeholder: 'e.g. 50000' },
     { key: 'stage', label: 'Stage', options: ['Lead', 'Qualified', 'Proposal', 'Negotiation', 'Won', 'Lost'] },
-    { key: 'probability', label: 'Win probability (%)', type: 'number', placeholder: 'e.g. 60' },
     { key: 'company', label: 'Company' }, { key: 'contact', label: 'Primary contact' },
     { key: 'owner', label: 'Owner' }, { key: 'expectedClose', label: 'Expected close', type: 'date' },
+    { key: 'probability', label: 'Win probability (%)', type: 'number', placeholder: 'e.g. 60' },
   ],
   tasks: [
     { key: 'title', label: 'Task title', required: true },
@@ -848,6 +847,7 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
   const [, setLocation] = useLocation();
   const name = member?.name || member?.email || 'Team member';
   const isSuperAdmin = member?.role === 'super_admin';
+  const isAdmin = member?.role === 'admin' || member?.role === 'owner' || isSuperAdmin;
   const effectiveNavGroups = isSuperAdmin ? [
     {
       label: 'Super Admin',
@@ -858,7 +858,13 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
         { label: 'Community', href: '/community', icon: Compass },
       ],
     },
-  ] : navGroups;
+  ] : navGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => {
+      if (item.href === '/companies' && !isAdmin) return false;
+      return true;
+    }),
+  }));
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -909,6 +915,33 @@ function Table({ headers, children, min = 'min-w-[740px]' }: { headers: string[]
   return <div className="overflow-x-auto"><table className={`w-full ${min} text-left`}><thead><tr className="border-b border-[#edf0ee] bg-[#fafbfa]">{headers.map(h => <th key={h} className="px-4 py-3 text-[9px] font-bold uppercase tracking-[.1em] text-[#8a9691] first:pl-5 last:pr-5">{h}</th>)}</tr></thead><tbody className="divide-y divide-[#f0f2f1]">{children}</tbody></table></div>;
 }
 
+function PostCommentInput({ postId, onComment, isPending }: { postId: number; onComment: (id: number, text: string) => void; isPending: boolean }) {
+  const [text, setText] = useState('');
+  return (
+    <form
+      className="mt-3 flex gap-2"
+      onSubmit={e => {
+        e.preventDefault();
+        const body = text.trim();
+        if (!body) return;
+        onComment(postId, body);
+        setText('');
+      }}
+    >
+      <input
+        data-testid={`input-comment-${postId}`}
+        value={text}
+        onChange={e => setText(e.target.value)}
+        placeholder="Add a thoughtful reply…"
+        className="min-w-0 flex-1 rounded-lg border border-[#e4eae6] bg-[#fafbfa] px-3 py-2 text-[11px] outline-none focus:border-[#9fc5ac]"
+      />
+      <Btn type="submit" kind="soft" disabled={!text.trim() || isPending}>
+        <Send size={13} /> Reply
+      </Btn>
+    </form>
+  );
+}
+
 function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
@@ -918,13 +951,14 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [modal, setModal] = useState<{ entity: string; row?: AnyRecord } | null>(null);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
   const [messageBody, setMessageBody] = useState('');
-  const [commentDraft, setCommentDraft] = useState<Record<number, string>>({});
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [postOpen, setPostOpen] = useState(false);
   const [postForm, setPostForm] = useState({ title: '', body: '', category: 'Founder question' });
   const [conversationOpen, setConversationOpen] = useState(false);
   const [conversationForm, setConversationForm] = useState({ name: '', type: 'direct', memberIds: '' });
+  const [selectedMemberIds, setSelectedMemberIds] = useState<number[]>([]);
+  const [inboxTab, setInboxTab] = useState<'chats' | 'teammates'>('chats');
   const [feedback, setFeedback] = useState<Notice>(null);
   const [taskTab, setTaskTab] = useState<'all' | 'remaining' | 'completed'>('all');
   const [dealView, setDealView] = useState<'kanban' | 'list'>('kanban');
@@ -936,10 +970,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const activity = useGetDashboardActivity(queryOpts(getGetDashboardActivityQueryKey(), path === '/dashboard', 30_000));
   const analytics = useGetAnalytics(queryOpts(getGetAnalyticsQueryKey(), path === '/dashboard', 30_000));
   const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts' || path === '/dashboard'));
-  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), path === '/companies' || path === '/dashboard'));
+  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), (path === '/companies' || path === '/dashboard') && isAdmin));
   const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals' || path === '/dashboard'));
   const tasks = useListTasks(undefined, queryOpts(getListTasksQueryKey(), path === '/tasks' || path === '/dashboard'));
-  const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team'));
+  const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team' || path === '/inbox' || path === '/dashboard'));
   const requests = useListJoinRequests({ query: { enabled: approved && isAdmin && path === '/team', queryKey: getListJoinRequestsQueryKey() } });
   const conversations = useListConversations(queryOpts(getListConversationsQueryKey(), path === '/inbox', 10_000));
   const posts = useListCommunityPosts(queryOpts(getListCommunityPostsQueryKey(), path === '/community', 30_000));
@@ -1158,7 +1192,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
               <div className="flex gap-4 min-w-[1200px] items-start">
                 {dealColumns.map(col => {
                   const colDeals = filtered.filter(d => (d.stage || 'Lead') === col.stage);
-                  const colTotal = colDeals.reduce((sum, d) => sum + (Number(d.value) || 0), 0);
                   return (
                     <div key={col.stage} className={`flex-1 rounded-xl border ${col.border} ${col.bg} p-3 flex flex-col min-w-[240px] max-w-[300px]`}>
                       <div className="flex items-center justify-between pb-2.5 mb-2 border-b border-black/5">
@@ -1166,7 +1199,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                           <span className={`px-2 py-0.5 rounded-md text-[11px] font-bold ${col.badge}`}>{col.stage}</span>
                           <span className="text-[11px] font-semibold text-[#6a7a74]">({colDeals.length})</span>
                         </div>
-                        <span className="text-[11px] font-mono font-bold text-[#2e3e38]">{currency(colTotal)}</span>
+                        <span className="text-[11px] font-semibold text-[#5a6b65]">{colDeals.length} {colDeals.length === 1 ? 'deal' : 'deals'}</span>
                       </div>
                       <div className="space-y-2.5 flex-1 min-h-[140px]">
                         {colDeals.length === 0 ? (
@@ -1197,8 +1230,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                                   <IconBtn icon={Trash2} onClick={() => removeResource('deals', deal)} title="Delete" />
                                 </div>
                               </div>
-                              <div className="mt-1.5 flex items-baseline justify-between">
-                                <span className="text-[14px] font-extrabold text-[#23352f]">{currency(deal.value)}</span>
+                              <div className="mt-1.5 flex items-center justify-between">
+                                <span className="text-[10px] font-semibold text-[#486358] bg-[#ecf4ef] px-2 py-0.5 rounded">
+                                  {deal.stage || 'Lead'}
+                                </span>
                                 {deal.probability ? (
                                   <span className="text-[10px] font-semibold text-[#546b62] bg-[#f0f5f2] px-1.5 py-0.5 rounded">{deal.probability}% win</span>
                                 ) : null}
@@ -1275,7 +1310,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                   : entity === 'companies'
                   ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', '']
                   : entity === 'deals'
-                  ? ['Opportunity', 'Company', 'Deal Value', 'Stage', 'Close date', 'Owner', '']
+                  ? ['Opportunity', 'Company', 'Stage', 'Win probability', 'Close date', 'Owner', '']
                   : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']
               }
             >
@@ -1324,7 +1359,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                         <p className="mt-0.5 text-[10px] text-[#84908c]">{r.contact || 'No contact'}</p>
                       </td>
                       <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.company || '—'}</td>
-                      <td className="px-4 py-3 text-[12px] font-bold text-[#273932]">{currency(r.value)}</td>
                       <td className="px-4 py-3">
                         <select
                           aria-label={`Change ${r.name} stage`}
@@ -1336,6 +1370,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                           {stageOptions.map(x => <option key={x} value={x}>{x}</option>)}
                         </select>
                       </td>
+                      <td className="px-4 py-3 text-[12px] text-[#52605b]">{r.probability ? `${r.probability}%` : '—'}</td>
                       <td className="px-4 py-3 text-[11px] text-[#87918d]">{dateLabel(r.expectedClose)}</td>
                       <td className="px-4 py-3 text-[11px] text-[#67746f]">{r.owner || '—'}</td>
                     </>
@@ -1400,7 +1435,29 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   function Dashboard() {
     const d: any = dash.data;
     const an: any = analytics.data;
-    const a: AnyRecord[] = (activity.data as AnyRecord[]) || [];
+    const allActivities: AnyRecord[] = (activity.data as AnyRecord[]) || [];
+    const a: AnyRecord[] = allActivities.filter(item => {
+      if (item.kind === 'superadmin') return false;
+      const title = String(item.title || '').toLowerCase();
+      const detail = String(item.detail || '').toLowerCase();
+      if (
+        title.includes('workspace admin') ||
+        title.includes('removed user') ||
+        title.includes('company removed') ||
+        title.includes('company added') ||
+        title.includes('company deleted') ||
+        title.includes('company updated') ||
+        title.includes('initiation code') ||
+        title.includes('admin password') ||
+        title.includes('pre-assigned') ||
+        title.includes('assigned user as admin') ||
+        detail.includes('workspace admin')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
     const allTasksList = (tasks.data as AnyRecord[]) || [];
     const allDealsList = (deals.data as AnyRecord[]) || [];
     const remainingTasks = allTasksList.filter(t => !/complete/i.test(t.status || ''));
@@ -1409,18 +1466,46 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const overdueTasks = remainingTasks.filter(t => t.dueDate && t.dueDate < todayStr);
     const topTasks = [...remainingTasks, ...completedTasks].slice(0, 6);
 
-    const monthlyRev: Array<{ month: string; amount: number }> = d?.monthlyRevenue || an?.monthlyRevenue || [];
-    const maxRev = Math.max(...monthlyRev.map(m => m.amount), 1);
-    const stageFunnel: Array<{ stage: string; count: number; value: number }> = d?.stageBreakdown || an?.stageBreakdown || [];
+    const taskCompletionRate = allTasksList.length ? Math.round((completedTasks.length / allTasksList.length) * 100) : 100;
+    const slaHealthPct = remainingTasks.length
+      ? Math.max(0, Math.round(((remainingTasks.length - overdueTasks.length) / remainingTasks.length) * 100))
+      : 100;
+    const activeDealsCount = allDealsList.filter(dl => !/won|lost/i.test(dl.stage || '')).length;
+
+    // Task breakdown by types
+    const typeCounts: Record<string, { total: number; done: number }> = {};
+    for (const t of allTasksList) {
+      const type = t.type || 'Follow-up';
+      if (!typeCounts[type]) typeCounts[type] = { total: 0, done: 0 };
+      typeCounts[type].total++;
+      if (/complete/i.test(t.status || '')) typeCounts[type].done++;
+    }
+    const taskTypesList = Object.entries(typeCounts).map(([type, stats]) => ({
+      type,
+      total: stats.total,
+      done: stats.done,
+      pct: Math.round((stats.done / Math.max(stats.total, 1)) * 100),
+    })).sort((x, y) => y.total - x.total);
+
+    // Stage Funnel (deals count only)
+    const stageFunnel: Array<{ stage: string; count: number }> = (d?.stageBreakdown || an?.stageBreakdown || []).map((s: any) => ({
+      stage: s.stage,
+      count: s.count,
+    }));
     const maxFunnelCount = Math.max(...stageFunnel.map(s => s.count), 1);
-    const ownersList: Array<{ owner: string; count: number; value: number }> = an?.ownerBreakdown || [];
-    const sortedOwners = [...ownersList].sort((x, y) => y.value - x.value);
+
+    // Team Leaderboard (deals & tasks assigned)
+    const ownersList: Array<{ owner: string; count: number }> = (an?.ownerBreakdown || []).map((o: any) => ({
+      owner: o.owner,
+      count: o.count,
+    }));
+    const sortedOwners = [...ownersList].sort((x, y) => y.count - x.count);
 
     return (
       <>
         <PageHeader
           title={`Good ${new Date().getHours() < 12 ? 'morning' : 'afternoon'}, ${(member.name || '').split(' ')[0] || 'there'}`}
-          description="Executive overview of your pipeline, revenue velocity, and high-priority relationship follow-ups."
+          description="Operational dashboard tracking opportunity execution, task resolution, and team follow-up SLA performance."
           action={
             <div className="flex flex-wrap items-center gap-2">
               <Btn kind="outline" onClick={() => exportToCsv(allDealsList, 'deals-pipeline')} title="Export deals CSV">
@@ -1434,7 +1519,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         />
         {notices}
 
-        {/* Frappe CRM Quick Action Ribbon */}
+        {/* Quick Action Ribbon */}
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#e2e8e4] bg-white p-2.5 shadow-sm">
           <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-[#798882]">Quick Actions:</span>
           <button
@@ -1458,13 +1543,15 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           >
             <CalendarDays size={13} className="text-[#967b36]" /> Follow-up
           </button>
-          <button
-            type="button"
-            onClick={() => setModal({ entity: 'companies' })}
-            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
-          >
-            <Building2 size={13} className="text-[#4b6a82]" /> Company
-          </button>
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={() => setModal({ entity: 'companies' })}
+              className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
+            >
+              <Building2 size={13} className="text-[#4b6a82]" /> Company
+            </button>
+          )}
           <div className="ml-auto hidden sm:flex items-center gap-2">
             <button
               type="button"
@@ -1493,47 +1580,49 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         ) : (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             <Metric
-              label="Active Pipeline"
-              value={currency(d?.pipelineValue ?? an?.pipelineValue ?? 0)}
-              note={`${d?.openDeals ?? 0} active deals`}
-              icon={DollarSign}
+              label="Active Opportunities"
+              value={String(activeDealsCount)}
+              note={`${allDealsList.length} total in pipeline`}
+              icon={Target}
               onClick={() => { setDealView('kanban'); setLocation('/deals'); }}
             />
             <Metric
-              label="Won This Month"
-              value={currency(d?.wonThisMonth ?? 0)}
-              note={`Win Rate: ${Math.round(an?.conversionRate ?? 0)}%`}
-              icon={Trophy}
+              label="Task Completion Rate"
+              value={`${taskCompletionRate}%`}
+              note={`${completedTasks.length} of ${allTasksList.length} resolved`}
+              icon={CheckCircle2}
+              onClick={() => setLocation('/tasks')}
             />
             <Metric
-              label="Total Won Pipeline"
-              value={currency(an?.wonValue ?? 0)}
-              note={`Avg Deal: ${currency(an?.averageDealSize ?? 0)}`}
-              icon={TrendingUp}
+              label="Follow-up SLA Health"
+              value={`${slaHealthPct}%`}
+              note={overdueTasks.length ? `${overdueTasks.length} overdue follow-ups` : 'All follow-ups on-track'}
+              icon={ShieldCheck}
+              onClick={() => setLocation('/tasks')}
             />
             <Metric
               label="Follow-ups Due"
-              value={String(d?.tasksDue ?? 0)}
+              value={String(remainingTasks.length)}
               note={overdueTasks.length ? `${overdueTasks.length} overdue · ${remainingTasks.length} pending` : `${remainingTasks.length} tasks remaining`}
               icon={CalendarDays}
               onClick={() => setLocation('/tasks')}
             />
             <Metric
-              label="Network Reach"
-              value={String(d?.contacts ?? 0)}
-              note={`${(companies.data as AnyRecord[] || []).length} companies mapped`}
+              label="Network Contacts"
+              value={String((contacts.data as AnyRecord[] || []).length)}
+              note={isAdmin ? `${(companies.data as AnyRecord[] || []).length} organizations mapped` : 'Active contacts'}
               icon={ContactRound}
               onClick={() => setLocation('/contacts')}
             />
           </div>
         )}
 
-        {/* Funnel & Revenue Charts */}
+        {/* Funnel & Task Completion Charts */}
         <div className="mt-5 grid gap-4 xl:grid-cols-2">
           <Card>
             <CardTitle
-              title="Pipeline Stage Funnel"
-              detail="Deal volume and dollar value across active sales stages"
+              title="Pipeline Stage Distribution"
+              detail="Opportunity volume across active pipeline stages"
               right={
                 <Link href="/deals" className="flex items-center gap-1 text-[11px] font-bold text-[#28785b] hover:underline">
                   Board <ArrowRight size={12} />
@@ -1544,13 +1633,14 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
               <div className="space-y-3.5 p-5">
                 {stageFunnel.map(s => {
                   const pct = Math.max(6, Math.min(100, (s.count / maxFunnelCount) * 100));
+                  const sharePct = allDealsList.length ? Math.round((s.count / allDealsList.length) * 100) : 0;
                   return (
                     <div key={s.stage} className="rounded-lg border border-[#f0f3f1] bg-[#fafcfb] p-3">
                       <div className="mb-2 flex items-center justify-between text-[11px]">
                         <span className="font-bold text-[#32423c]">{s.stage}</span>
                         <div className="flex items-center gap-3">
                           <span className="font-semibold text-[#667671]">{s.count} {s.count === 1 ? 'deal' : 'deals'}</span>
-                          <span className="font-mono font-bold text-[#28785b]">{currency(s.value)}</span>
+                          <span className="font-semibold text-[#28785b]">{sharePct}% of pipeline</span>
                         </div>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-[#e8eee9]">
@@ -1574,36 +1664,77 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
 
           <Card>
             <CardTitle
-              title="6-Month Revenue Trajectory"
-              detail="Closed-won deals revenue velocity over time"
-              right={<Trophy size={15} className="text-[#b58c38]" />}
+              title="Task Completion & Productivity Performance"
+              detail="Follow-up resolution velocity, status distribution, and activity by type"
+              right={
+                <Link href="/tasks" className="flex items-center gap-1 text-[11px] font-bold text-[#28785b] hover:underline">
+                  All Tasks <ArrowRight size={12} />
+                </Link>
+              }
             />
             <div className="p-5">
-              {monthlyRev.length ? (
-                <div className="flex h-52 items-end justify-between gap-3 pt-6 border-b border-[#edf0ee] pb-3">
-                  {monthlyRev.map((m, idx) => {
-                    const heightPct = Math.max(12, Math.min(100, Math.round((m.amount / maxRev) * 100)));
-                    return (
-                      <div key={idx} className="flex flex-1 flex-col items-center h-full justify-end group">
-                        <span className="mb-1 text-[10px] font-bold text-[#384b43] opacity-80 group-hover:opacity-100 transition truncate max-w-full">
-                          {currency(m.amount)}
-                        </span>
-                        <div className="w-full max-w-[42px] rounded-t-md bg-[#e4ede7] group-hover:bg-[#34835e] transition-all flex items-end justify-center overflow-hidden" style={{ height: `${heightPct}%` }}>
-                          <div className="w-full bg-[#32805d] group-hover:bg-[#256f4d] h-full transition" />
+              {/* Overall Progress Bar */}
+              <div className="rounded-xl border border-[#e5ebe7] bg-[#fbfcfb] p-4">
+                <div className="flex items-center justify-between mb-2">
+                  <span className="text-[12px] font-bold text-[#34443e]">Overall Resolution Rate</span>
+                  <span className="text-[14px] font-extrabold text-[#28785b]">{taskCompletionRate}%</span>
+                </div>
+                <div className="h-3 overflow-hidden rounded-full bg-[#e8eee9] flex">
+                  <div
+                    className="h-full bg-[#28785b] transition-all duration-500"
+                    style={{ width: `${taskCompletionRate}%` }}
+                    title={`Completed: ${completedTasks.length}`}
+                  />
+                  <div
+                    className="h-full bg-rose-400 transition-all duration-500"
+                    style={{ width: `${allTasksList.length ? Math.round((overdueTasks.length / allTasksList.length) * 100) : 0}%` }}
+                    title={`Overdue: ${overdueTasks.length}`}
+                  />
+                </div>
+                <div className="mt-2.5 flex items-center justify-between text-[10px] text-[#788882]">
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-[#28785b]" /> {completedTasks.length} Completed
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-[#d0dad4]" /> {remainingTasks.length - overdueTasks.length} Open
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="h-2 w-2 rounded-full bg-rose-400" /> {overdueTasks.length} Overdue
+                  </span>
+                </div>
+              </div>
+
+              {/* Activity breakdown by Type */}
+              <div className="mt-4">
+                <p className="mb-2.5 text-[11px] font-bold uppercase tracking-wider text-[#798882]">Activity Performance by Type</p>
+                {taskTypesList.length ? (
+                  <div className="space-y-2.5">
+                    {taskTypesList.slice(0, 4).map(item => (
+                      <div key={item.type} className="rounded-lg border border-[#f0f3f1] bg-white p-2.5">
+                        <div className="flex items-center justify-between text-[11px] mb-1.5">
+                          <span className="font-semibold text-[#32423c]">{item.type}</span>
+                          <span className="text-[10px] font-medium text-[#6c7d77]">
+                            <strong className="text-[#28785b]">{item.done}</strong> of {item.total} completed ({item.pct}%)
+                          </span>
                         </div>
-                        <span className="mt-2 text-[11px] font-semibold text-[#73847e]">{m.month}</span>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-[#edf1ee]">
+                          <div
+                            className="h-full rounded-full bg-[#32845f] transition-all duration-500"
+                            style={{ width: `${item.pct}%` }}
+                          />
+                        </div>
                       </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="grid h-48 place-items-center text-center text-[12px] text-[#798882]">
-                  <p>No revenue history yet. Won deals will graph here automatically.</p>
-                </div>
-              )}
-              <div className="mt-3 flex items-center justify-between text-[11px] text-[#788882]">
-                <span>Total Closed Won: <strong className="text-[#2b3d36]">{currency(an?.wonValue ?? 0)}</strong></span>
-                <span>Win Rate: <strong className="text-[#28785b]">{Math.round(an?.conversionRate ?? 0)}%</strong></span>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#84928d] italic py-2">Add follow-up tasks to graph activity completion by type.</p>
+                )}
+              </div>
+
+              {/* Bottom SLA Summary */}
+              <div className="mt-4 flex items-center justify-between border-t border-[#edf0ee] pt-3 text-[11px] text-[#788882]">
+                <span>SLA Health: <strong className="text-[#28785b]">{slaHealthPct}%</strong> on-schedule</span>
+                <span>Pending Queue: <strong className="text-[#32423c]">{remainingTasks.length}</strong> tasks</span>
               </div>
             </div>
           </Card>
@@ -1613,8 +1744,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         <div className="mt-4 grid gap-4 xl:grid-cols-2">
           <Card>
             <CardTitle
-              title="Sales Rep Pipeline Leaderboard"
-              detail="Active opportunity allocation and pipeline volume by team member"
+              title="Team Opportunity & Pipeline Allocation"
+              detail="Active opportunity assignments and pipeline distribution by team member"
               right={<Users size={15} className="text-[#788781]" />}
             />
             {sortedOwners.length ? (
@@ -1629,7 +1760,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                       <p className="truncate text-[12px] font-bold text-[#34443e]">{owner.owner}</p>
                       <p className="text-[10px] text-[#80908a]">{owner.count} active {owner.count === 1 ? 'deal' : 'deals'}</p>
                     </div>
-                    <span className="font-mono text-[12px] font-extrabold text-[#28785b]">{currency(owner.value)}</span>
+                    <span className="text-[12px] font-bold text-[#28785b]">{owner.count} assigned</span>
                   </div>
                 ))}
               </div>
@@ -1763,15 +1894,494 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   }
   function InboxPage() {
     const convs: AnyRecord[] = conversations.data || [];
-    return <><PageHeader title="Inbox" description="Direct messages and group conversations, all in one place." action={<Btn onClick={() => setConversationOpen(true)}><Plus size={15} /> New conversation</Btn>} />{notices}<Card className="grid min-h-[590px] overflow-hidden md:grid-cols-[290px_1fr]"><div className="border-r border-[#edf0ee]"><div className="border-b border-[#edf0ee] p-4"><div className="relative"><Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" /><input data-testid="input-search-conversations" value={search} onChange={e => setSearch(e.target.value)} placeholder="Find a conversation" className="w-full rounded-lg border border-[#e4eae6] bg-[#fafbfa] py-2 pl-8 pr-2 text-[11px] outline-none" /></div></div>{conversations.isLoading ? <LoadingRows /> : conversations.isError ? <Empty title="Inbox unavailable" detail="We couldn’t load your conversations." button={<Btn kind="outline" onClick={() => conversations.refetch()}><RotateCw size={13} /> Retry</Btn>} /> : convs.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).length ? convs.filter(c => c.name.toLowerCase().includes(search.toLowerCase())).map(c => <button key={c.id} data-testid={`conversation-${c.id}`} onClick={() => setActiveConversation(c.id)} className={`flex w-full items-start gap-3 border-b border-[#f0f2f1] px-4 py-3.5 text-left transition hover:bg-[#fafcfb] ${activeConversation === c.id ? 'bg-[#f0f6f2]' : ''}`}><Avatar name={c.name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><strong className="truncate text-[11px] text-[#394841]">{c.name}</strong><span className="text-[9px] text-[#9aa49f]">{dateLabel(c.updatedAt)}</span></span><span className="mt-1 block truncate text-[10px] text-[#89948f]">{c.lastMessage || 'Start the conversation'}</span><span className="mt-1 block text-[9px] capitalize text-[#a0aaa5]">{c.type} · {(c.memberNames || []).join(', ')}</span></span>{c.unreadCount > 0 && <span className="mt-1 h-2 w-2 rounded-full bg-[#43845f]" />}</button>) : <Empty title="No conversations yet" detail="Start a direct or group chat with your team." button={<Btn onClick={() => setConversationOpen(true)}><Plus size={13} /> Start a conversation</Btn>} />}</div>
-        <div className="flex min-h-[500px] flex-col bg-[#fcfdfc]">{activeConversation ? <><div className="flex items-center gap-3 border-b border-[#edf0ee] bg-white px-5 py-3.5"><Avatar name={convs.find(c => c.id === activeConversation)?.name} size="sm" /><div><p className="text-[12px] font-bold">{convs.find(c => c.id === activeConversation)?.name}</p><p className="text-[10px] text-[#87938e]">{(convs.find(c => c.id === activeConversation)?.memberNames || []).join(' · ')}</p></div></div><div className="flex-1 space-y-4 overflow-y-auto p-5">{messages.isLoading ? <LoadingRows /> : messages.isError ? <Empty title="Messages could not load" detail="Try again to retrieve your conversation history." button={<Btn kind="outline" onClick={() => messages.refetch()}><RotateCw size={13} /> Retry</Btn>} /> : (messages.data as AnyRecord[] || []).length ? (messages.data as AnyRecord[]).map(m => <div key={m.id} data-testid={`message-${m.id}`} className={`flex gap-2.5 ${m.senderId === member.id ? 'flex-row-reverse' : ''}`}><Avatar name={m.senderName} size="sm" /><div className={`max-w-[75%] rounded-xl px-3.5 py-2.5 ${m.senderId === member.id ? 'bg-[#e8f2eb] text-[#31473a]' : 'border border-[#e8eeea] bg-white text-[#4e5b56]'}`}><p className="mb-1 text-[9px] font-bold text-[#75827d]">{m.senderName}</p><p className="whitespace-pre-wrap text-[12px] leading-5">{m.body}</p><p className="mt-1 text-right text-[9px] text-[#98a39e]">{new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(m.createdAt))}</p></div></div>) : <Empty title="Start with a hello" detail="Your team's conversation history will collect here." />}</div><form className="flex items-end gap-2 border-t border-[#edf0ee] bg-white p-3" onSubmit={e => { e.preventDefault(); if (!messageBody.trim() || !activeConversation) return; createMessage.mutate({ id: activeConversation, data: { body: messageBody.trim() } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListMessagesQueryKey(activeConversation) }); qc.invalidateQueries({ queryKey: getListConversationsQueryKey() }); setMessageBody(''); setNotice({ tone: 'good', text: 'Message sent.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Message could not be sent. Try again.' }) }); }}><textarea data-testid="input-message-body" value={messageBody} onChange={e => setMessageBody(e.target.value)} rows={1} placeholder="Write a message…" className="max-h-28 min-h-10 flex-1 resize-y rounded-lg border border-[#e2e9e5] bg-[#fafbfa] px-3 py-2.5 text-[12px] outline-none focus:border-[#9fc5ac]" /><Btn type="submit" disabled={!messageBody.trim() || createMessage.isPending} className="h-10 w-10 px-0"><Send size={15} /></Btn></form></> : <div className="flex flex-1 flex-col items-center justify-center px-8 text-center"><span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#edf4f0] text-[#428263]"><MessageCircle size={20} /></span><h3 className="mt-4 text-[14px] font-bold text-[#35443e]">Your team, in the loop</h3><p className="mt-1 max-w-xs text-[11px] leading-5 text-[#85918c]">Pick a conversation to catch up, or start a new one with your teammates.</p><Btn className="mt-4" onClick={() => setConversationOpen(true)}><Plus size={13} /> New conversation</Btn></div>}</div>
-      </Card>{conversationOpen && <Dialog title="New conversation" onClose={() => setConversationOpen(false)}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); const ids = conversationForm.memberIds.split(',').map(x => Number(x.trim())).filter(Boolean); createConversation.mutate({ data: { name: conversationForm.name, type: conversationForm.type as any, memberIds: ids } }, { onSuccess: (c: any) => { qc.invalidateQueries({ queryKey: getListConversationsQueryKey() }); setConversationOpen(false); setActiveConversation(c.id); setNotice({ tone: 'good', text: 'Conversation created.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Conversation could not be created.' }) }); }}><FieldInput field={{ key: 'name', label: 'Conversation name', required: true }} value={conversationForm.name} set={v => setConversationForm({ ...conversationForm, name: v })} /><FieldInput field={{ key: 'type', label: 'Type', options: ['direct', 'group'] }} value={conversationForm.type} set={v => setConversationForm({ ...conversationForm, type: v })} /><label className="block text-[12px] font-semibold text-[#52605d]">Member IDs <span className="font-normal text-[#87938e]">(comma-separated)</span><input data-testid="input-conversation-members" required value={conversationForm.memberIds} onChange={e => setConversationForm({ ...conversationForm, memberIds: e.target.value })} className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2.5 text-[12px] font-normal outline-none focus:border-[#70a88c]" placeholder="e.g. 2, 4" /></label><p className="text-[10px] text-[#87938e]">Find member IDs in the Team view. No passwords are shared in chat or invitations.</p><div className="flex justify-end gap-2 pt-2"><Btn kind="outline" onClick={() => setConversationOpen(false)}>Cancel</Btn><Btn type="submit" disabled={createConversation.isPending}>{createConversation.isPending ? 'Creating…' : 'Create conversation'}</Btn></div></form></Dialog>}</>;
+    const teamMembersList: AnyRecord[] = ((members.data || []) as AnyRecord[]).filter(
+      m => m.id !== member.id && m.role !== 'super_admin'
+    );
+    const filteredConvs = convs.filter(c => (c.name || '').toLowerCase().includes(search.toLowerCase()));
+    const filteredTeammates = teamMembersList.filter(
+      m => (m.name || '').toLowerCase().includes(search.toLowerCase()) || (m.email || '').toLowerCase().includes(search.toLowerCase())
+    );
+
+    const startDirectChatWith = (tm: AnyRecord) => {
+      const existing = convs.find(c => {
+        if (c.type === 'direct') {
+          const names = c.memberNames || [];
+          if (names.includes(tm.name) || names.includes(tm.email)) return true;
+          if (c.name === tm.name || c.name === tm.email) return true;
+        }
+        return false;
+      });
+      if (existing) {
+        setActiveConversation(existing.id);
+        setInboxTab('chats');
+        return;
+      }
+      createConversation.mutate(
+        { data: { name: tm.name || tm.email, type: 'direct', memberIds: [tm.id] } },
+        {
+          onSuccess: (c: any) => {
+            qc.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+            setActiveConversation(c.id);
+            setInboxTab('chats');
+            setNotice({ tone: 'good', text: `Started chat with ${tm.name || tm.email}.` });
+          },
+          onError: () => setNotice({ tone: 'bad', text: 'Could not start conversation.' }),
+        }
+      );
+    };
+
+    return (
+      <>
+        <PageHeader
+          title="Inbox"
+          description="Direct messages and group conversations with your teammates, all in one place."
+          action={
+            <Btn onClick={() => { setSelectedMemberIds([]); setConversationForm({ name: '', type: 'direct', memberIds: '' }); setConversationOpen(true); }}>
+              <Plus size={15} /> New conversation
+            </Btn>
+          }
+        />
+        {notices}
+        <Card className="grid min-h-[590px] overflow-hidden md:grid-cols-[300px_1fr]">
+          <div className="flex flex-col border-r border-[#edf0ee]">
+            {/* Tabs between Chats and Teammates */}
+            <div className="flex border-b border-[#edf0ee] bg-[#fafbfa]">
+              <button
+                type="button"
+                onClick={() => setInboxTab('chats')}
+                className={`flex-1 py-2.5 text-center text-[11px] font-bold transition border-b-2 ${inboxTab === 'chats' ? 'border-[#28785b] text-[#28785b] bg-white' : 'border-transparent text-[#6e7d77] hover:text-[#28785b]'}`}
+              >
+                Chats ({convs.length})
+              </button>
+              <button
+                type="button"
+                onClick={() => setInboxTab('teammates')}
+                className={`flex-1 py-2.5 text-center text-[11px] font-bold transition border-b-2 ${inboxTab === 'teammates' ? 'border-[#28785b] text-[#28785b] bg-white' : 'border-transparent text-[#6e7d77] hover:text-[#28785b]'}`}
+              >
+                Teammates ({teamMembersList.length})
+              </button>
+            </div>
+
+            <div className="border-b border-[#edf0ee] p-3">
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" />
+                <input
+                  data-testid="input-search-conversations"
+                  value={search}
+                  onChange={e => setSearch(e.target.value)}
+                  placeholder={inboxTab === 'chats' ? 'Find a conversation…' : 'Find a teammate…'}
+                  className="w-full rounded-lg border border-[#e4eae6] bg-[#fafbfa] py-1.5 pl-8 pr-2 text-[11px] outline-none focus:border-[#9fc5ac]"
+                />
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto">
+              {inboxTab === 'chats' ? (
+                conversations.isLoading ? (
+                  <LoadingRows />
+                ) : conversations.isError ? (
+                  <Empty title="Inbox unavailable" detail="We couldn’t load your conversations." button={<Btn kind="outline" onClick={() => conversations.refetch()}><RotateCw size={13} /> Retry</Btn>} />
+                ) : filteredConvs.length ? (
+                  filteredConvs.map(c => (
+                    <button
+                      key={c.id}
+                      data-testid={`conversation-${c.id}`}
+                      onClick={() => setActiveConversation(c.id)}
+                      className={`flex w-full items-start gap-3 border-b border-[#f0f2f1] px-4 py-3 text-left transition hover:bg-[#fafcfb] ${activeConversation === c.id ? 'bg-[#f0f6f2]' : ''}`}
+                    >
+                      <Avatar name={c.name} />
+                      <span className="min-w-0 flex-1">
+                        <span className="flex items-center justify-between gap-2">
+                          <strong className="truncate text-[11px] text-[#394841]">{c.name}</strong>
+                          <span className="text-[9px] text-[#9aa49f]">{dateLabel(c.updatedAt)}</span>
+                        </span>
+                        <span className="mt-1 block truncate text-[10px] text-[#89948f]">{c.lastMessage || 'Start the conversation'}</span>
+                        <span className="mt-1 block text-[9px] capitalize text-[#a0aaa5]">{c.type} · {(c.memberNames || []).join(', ')}</span>
+                      </span>
+                      {c.unreadCount > 0 && <span className="mt-1 h-2 w-2 rounded-full bg-[#43845f]" />}
+                    </button>
+                  ))
+                ) : (
+                  <div className="p-4 text-center">
+                    <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#edf4f0] text-[#347b56]">
+                      <MessageCircle size={18} />
+                    </div>
+                    <p className="text-[12px] font-bold text-[#35443e]">No chats yet</p>
+                    <p className="mt-1 text-[11px] text-[#84928d]">Start messaging directly with your workspace teammates:</p>
+                    <div className="mt-3 space-y-2 text-left">
+                      {teamMembersList.length ? teamMembersList.map(tm => (
+                        <div key={tm.id} className="flex items-center justify-between rounded-lg border border-[#e4eae6] bg-[#fbfcfb] p-2 hover:bg-white transition">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <Avatar name={tm.name} size="sm" />
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-semibold text-[#32423c]">{tm.name}</p>
+                              <p className="truncate text-[9px] text-[#86928e]">{tm.role}</p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => startDirectChatWith(tm)}
+                            className="rounded-md bg-[#28785b] px-2.5 py-1 text-[10px] font-bold text-white hover:bg-[#20634a] transition"
+                          >
+                            Chat
+                          </button>
+                        </div>
+                      )) : (
+                        <p className="text-[11px] text-[#8e9d97] text-center py-2">Invite team members to begin chatting.</p>
+                      )}
+                    </div>
+                  </div>
+                )
+              ) : (
+                /* Teammates Tab */
+                <div className="divide-y divide-[#f0f2f1]">
+                  {filteredTeammates.length ? (
+                    filteredTeammates.map(tm => (
+                      <div key={tm.id} className="flex items-center justify-between p-3.5 transition hover:bg-[#fafcfb]">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <Avatar name={tm.name} size="sm" />
+                          <div className="min-w-0">
+                            <p className="truncate text-[12px] font-semibold text-[#34443e]">{tm.name}</p>
+                            <p className="truncate text-[10px] text-[#86928e]">{tm.email} · <Badge tone={tm.role === 'admin' ? 'purple' : 'neutral'}>{tm.role}</Badge></p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => startDirectChatWith(tm)}
+                          className="flex items-center gap-1 rounded-md border border-[#28785b] bg-[#f0f7f3] px-2.5 py-1.5 text-[10px] font-bold text-[#28785b] hover:bg-[#28785b] hover:text-white transition"
+                        >
+                          <Send size={11} /> Chat
+                        </button>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="p-4 text-center text-[11px] text-[#84928d]">No matching teammates found.</div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex min-h-[500px] flex-col bg-[#fcfdfc]">
+            {activeConversation ? (
+              <>
+                <div className="flex items-center gap-3 border-b border-[#edf0ee] bg-white px-5 py-3.5">
+                  <Avatar name={convs.find(c => c.id === activeConversation)?.name} size="sm" />
+                  <div>
+                    <p className="text-[12px] font-bold">{convs.find(c => c.id === activeConversation)?.name}</p>
+                    <p className="text-[10px] text-[#87938e]">{(convs.find(c => c.id === activeConversation)?.memberNames || []).join(' · ')}</p>
+                  </div>
+                </div>
+                <div className="flex-1 space-y-4 overflow-y-auto p-5">
+                  {messages.isLoading ? (
+                    <LoadingRows />
+                  ) : messages.isError ? (
+                    <Empty title="Messages could not load" detail="Try again to retrieve your conversation history." button={<Btn kind="outline" onClick={() => messages.refetch()}><RotateCw size={13} /> Retry</Btn>} />
+                  ) : (messages.data as AnyRecord[] || []).length ? (
+                    (messages.data as AnyRecord[]).map(m => (
+                      <div key={m.id} data-testid={`message-${m.id}`} className={`flex gap-2.5 ${m.senderId === member.id ? 'flex-row-reverse' : ''}`}>
+                        <Avatar name={m.senderName} size="sm" />
+                        <div className={`max-w-[75%] rounded-xl px-3.5 py-2.5 ${m.senderId === member.id ? 'bg-[#e8f2eb] text-[#31473a]' : 'border border-[#e8eeea] bg-white text-[#4e5b56]'}`}>
+                          <p className="mb-1 text-[9px] font-bold text-[#75827d]">{m.senderName}</p>
+                          <p className="whitespace-pre-wrap text-[12px] leading-5">{m.body}</p>
+                          <p className="mt-1 text-right text-[9px] text-[#98a39e]">{new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit' }).format(new Date(m.createdAt))}</p>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <Empty title="Start with a hello" detail="Send a message to start this conversation." />
+                  )}
+                </div>
+                <form
+                  className="flex items-end gap-2 border-t border-[#edf0ee] bg-white p-3"
+                  onSubmit={e => {
+                    e.preventDefault();
+                    if (!messageBody.trim() || !activeConversation) return;
+                    createMessage.mutate(
+                      { id: activeConversation, data: { body: messageBody.trim() } },
+                      {
+                        onSuccess: () => {
+                          qc.invalidateQueries({ queryKey: getListMessagesQueryKey(activeConversation) });
+                          qc.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+                          setMessageBody('');
+                          setNotice({ tone: 'good', text: 'Message sent.' });
+                        },
+                        onError: () => setNotice({ tone: 'bad', text: 'Message could not be sent. Try again.' }),
+                      }
+                    );
+                  }}
+                >
+                  <textarea
+                    data-testid="input-message-body"
+                    value={messageBody}
+                    onChange={e => setMessageBody(e.target.value)}
+                    rows={1}
+                    placeholder="Write a message…"
+                    className="max-h-28 min-h-10 flex-1 resize-y rounded-lg border border-[#e2e9e5] bg-[#fafbfa] px-3 py-2.5 text-[12px] outline-none focus:border-[#9fc5ac]"
+                  />
+                  <Btn type="submit" disabled={!messageBody.trim() || createMessage.isPending} className="h-10 w-10 px-0">
+                    <Send size={15} />
+                  </Btn>
+                </form>
+              </>
+            ) : (
+              <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
+                <span className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[#edf4f0] text-[#428263]">
+                  <MessageCircle size={20} />
+                </span>
+                <h3 className="mt-4 text-[14px] font-bold text-[#35443e]">Your team, in the loop</h3>
+                <p className="mt-1 max-w-xs text-[11px] leading-5 text-[#85918c]">Pick a conversation to catch up, or start a new one with your teammates.</p>
+                <div className="mt-4 flex gap-2">
+                  <Btn onClick={() => { setSelectedMemberIds([]); setConversationOpen(true); }}><Plus size={13} /> New conversation</Btn>
+                  <Btn kind="outline" onClick={() => setInboxTab('teammates')}>View Teammates</Btn>
+                </div>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        {/* Modal with teammate checkboxes */}
+        {conversationOpen && (
+          <Dialog title="New conversation" onClose={() => setConversationOpen(false)}>
+            <form
+              className="space-y-4 p-5"
+              onSubmit={e => {
+                e.preventDefault();
+                if (!selectedMemberIds.length) {
+                  setNotice({ tone: 'bad', text: 'Please select at least one teammate.' });
+                  return;
+                }
+                const defaultName = selectedMemberIds.length === 1
+                  ? teamMembersList.find(m => m.id === selectedMemberIds[0])?.name || 'Direct Chat'
+                  : `Group (${selectedMemberIds.length} members)`;
+                const convName = conversationForm.name.trim() || defaultName;
+
+                createConversation.mutate(
+                  { data: { name: convName, type: (selectedMemberIds.length > 1 ? 'group' : conversationForm.type) as any, memberIds: selectedMemberIds } },
+                  {
+                    onSuccess: (c: any) => {
+                      qc.invalidateQueries({ queryKey: getListConversationsQueryKey() });
+                      setConversationOpen(false);
+                      setActiveConversation(c.id);
+                      setInboxTab('chats');
+                      setNotice({ tone: 'good', text: 'Conversation created.' });
+                    },
+                    onError: () => setNotice({ tone: 'bad', text: 'Conversation could not be created.' }),
+                  }
+                );
+              }}
+            >
+              <FieldInput field={{ key: 'name', label: 'Conversation name (optional for direct chats)' }} value={conversationForm.name} set={v => setConversationForm({ ...conversationForm, name: v })} />
+              <FieldInput field={{ key: 'type', label: 'Type', options: ['direct', 'group'] }} value={conversationForm.type} set={v => setConversationForm({ ...conversationForm, type: v })} />
+
+              <div>
+                <label className="block text-[12px] font-semibold text-[#52605d] mb-1.5">
+                  Select Teammates ({selectedMemberIds.length} selected)
+                </label>
+                {teamMembersList.length ? (
+                  <div className="max-h-52 overflow-y-auto space-y-1 rounded-lg border border-[#dce5e0] bg-[#fbfcfb] p-2">
+                    {teamMembersList.map(tm => {
+                      const isSelected = selectedMemberIds.includes(tm.id);
+                      return (
+                        <button
+                          key={tm.id}
+                          type="button"
+                          onClick={() => {
+                            if (isSelected) {
+                              setSelectedMemberIds(selectedMemberIds.filter(id => id !== tm.id));
+                            } else {
+                              setSelectedMemberIds([...selectedMemberIds, tm.id]);
+                              if (!conversationForm.name) {
+                                setConversationForm(cf => ({ ...cf, name: tm.name }));
+                              }
+                            }
+                          }}
+                          className={`flex w-full items-center justify-between rounded-md p-2 text-left transition ${isSelected ? 'bg-[#e7f3ec] text-[#246b4e]' : 'hover:bg-white text-[#384842]'}`}
+                        >
+                          <div className="flex items-center gap-2 min-w-0">
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              readOnly
+                              className="h-3.5 w-3.5 rounded border-[#c5d5cd] text-[#28785b] focus:ring-0"
+                            />
+                            <Avatar name={tm.name} size="sm" />
+                            <div className="min-w-0">
+                              <p className="truncate text-[11px] font-bold">{tm.name}</p>
+                              <p className="truncate text-[9px] text-[#788882]">{tm.email} · {tm.role}</p>
+                            </div>
+                          </div>
+                          {isSelected && <Check size={14} className="text-[#28785b]" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <p className="text-[11px] text-[#7e8e88] italic">No approved teammates found in workspace.</p>
+                )}
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-3">
+                <Btn kind="outline" onClick={() => setConversationOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={createConversation.isPending || !selectedMemberIds.length}>
+                  {createConversation.isPending ? 'Creating…' : 'Start conversation'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+      </>
+    );
   }
   function Community() {
     const list: AnyRecord[] = posts.data || [];
-    return <><PageHeader title="Community" description="Trade hard-won lessons with the people building alongside you." action={<Btn onClick={() => setPostOpen(true)}><Plus size={15} /> Start a conversation</Btn>} />{notices}<div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]"><div className="space-y-3">{posts.isLoading ? <Card><LoadingRows /></Card> : posts.isError ? <Card><Empty title="Community feed unavailable" detail="We couldn’t load the latest conversations." button={<Btn kind="outline" onClick={() => posts.refetch()}><RotateCw size={13} /> Retry</Btn>} /></Card> : list.length ? list.map(p => <Card key={p.id} data-testid={`post-${p.id}`}><div className="p-5"><div className="flex items-start justify-between gap-3"><div className="flex items-center gap-2.5"><Avatar name={p.author} /><div><p className="text-[12px] font-bold text-[#3c4b45]">{p.author}</p><p className="mt-0.5 text-[10px] text-[#8a9691]">{dateLabel(p.createdAt)}</p></div></div><Badge tone="blue">{p.category || 'Community'}</Badge></div><h2 className="mt-4 font-display text-[16px] font-bold tracking-tight text-[#34423d]">{p.title}</h2><p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#687671]">{p.body}</p><div className="mt-4 flex items-center gap-4 border-t border-[#eef1ef] pt-3"><span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]"><TrendingUp size={13} /> {p.likes || 0} people found this useful</span><span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]"><MessageSquareText size={13} /> {p.comments?.length || 0} replies</span></div>{p.comments?.length > 0 && <div className="mt-2 space-y-2 border-l-2 border-[#e6eee8] pl-3">{p.comments.map((c: AnyRecord) => <div key={c.id} className="rounded-lg bg-[#f8faf8] px-3 py-2"><span className="text-[10px] font-bold text-[#53635c]">{c.author}</span><span className="ml-2 text-[9px] text-[#9aa49f]">{dateLabel(c.createdAt)}</span><p className="mt-1 text-[11px] leading-5 text-[#6c7973]">{c.body}</p></div>)}</div>}<form className="mt-3 flex gap-2" onSubmit={e => { e.preventDefault(); const body = commentDraft[p.id]?.trim(); if (!body) return; createComment.mutate({ id: p.id, data: { body } }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() }); setCommentDraft(old => ({ ...old, [p.id]: '' })); setNotice({ tone: 'good', text: 'Reply added to the conversation.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Your reply could not be posted. Try again.' }) }); }}><input data-testid={`input-comment-${p.id}`} value={commentDraft[p.id] || ''} onChange={e => setCommentDraft(old => ({ ...old, [p.id]: e.target.value }))} placeholder="Add a thoughtful reply…" className="min-w-0 flex-1 rounded-lg border border-[#e4eae6] bg-[#fafbfa] px-3 py-2 text-[11px] outline-none focus:border-[#9fc5ac]" /><Btn type="submit" kind="soft" disabled={!commentDraft[p.id]?.trim() || createComment.isPending}><Send size={13} /> Reply</Btn></form></div></Card>) : <Card><Empty title="A good community starts with a question" detail="Share a founder challenge, a useful lesson, or a win worth passing on." button={<Btn onClick={() => setPostOpen(true)}><Plus size={14} /> Write the first post</Btn>} /></Card>}</div>
-        <aside className="space-y-3"><Card><div className="p-5"><div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#edf4ef] text-[#43815f]"><Globe2 size={17} /></div><h3 className="mt-3 text-[13px] font-bold">A room for builders</h3><p className="mt-1 text-[11px] leading-5 text-[#7c8983]">Ask openly, give context, and share the playbook you wish you had sooner.</p><Btn kind="soft" className="mt-4 w-full" onClick={() => setPostOpen(true)}><Plus size={13} /> Start a post</Btn></div></Card><Card><CardTitle title="Good community habits" /><div className="space-y-3 p-4"><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Include context so answers can be useful.</p><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Give feedback generously and specifically.</p><p className="flex gap-2 text-[10px] leading-4 text-[#687670]"><Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Share what worked, not just what should.</p></div></Card></aside></div>
-      {postOpen && <Dialog title="Start a conversation" onClose={() => setPostOpen(false)}><form className="space-y-4 p-5" onSubmit={e => { e.preventDefault(); createPost.mutate({ data: postForm }, { onSuccess: () => { qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() }); setPostOpen(false); setPostForm({ title: '', body: '', category: 'Founder question' }); setNotice({ tone: 'good', text: 'Your post is live in the community.' }); }, onError: () => setNotice({ tone: 'bad', text: 'Post could not be published. Check the details and try again.' }) }); }}><FieldInput field={{ key: 'title', label: 'Title', required: true }} value={postForm.title} set={v => setPostForm({ ...postForm, title: v })} /><FieldInput field={{ key: 'category', label: 'Topic', options: ['Founder question', 'Go-to-market', 'Hiring', 'Product', 'Milestone'] }} value={postForm.category} set={v => setPostForm({ ...postForm, category: v })} /><FieldInput field={{ key: 'body', label: 'What’s on your mind?', type: 'textarea', required: true }} value={postForm.body} set={v => setPostForm({ ...postForm, body: v })} /><div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4"><Btn kind="outline" onClick={() => setPostOpen(false)}>Cancel</Btn><Btn type="submit" disabled={createPost.isPending}><Send size={14} /> {createPost.isPending ? 'Publishing…' : 'Publish post'}</Btn></div></form></Dialog>}</>;
+    return (
+      <>
+        <PageHeader
+          title="Community"
+          description="Trade hard-won lessons with the people building alongside you."
+          action={<Btn onClick={() => setPostOpen(true)}><Plus size={15} /> Start a conversation</Btn>}
+        />
+        {notices}
+        <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+          <div className="space-y-3">
+            {posts.isLoading ? (
+              <Card><LoadingRows /></Card>
+            ) : posts.isError ? (
+              <Card>
+                <Empty
+                  title="Community feed unavailable"
+                  detail="We couldn’t load the latest conversations."
+                  button={<Btn kind="outline" onClick={() => posts.refetch()}><RotateCw size={13} /> Retry</Btn>}
+                />
+              </Card>
+            ) : list.length ? (
+              list.map(p => (
+                <Card key={p.id} data-testid={`post-${p.id}`}>
+                  <div className="p-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="flex items-center gap-2.5">
+                        <Avatar name={p.author} />
+                        <div>
+                          <p className="text-[12px] font-bold text-[#3c4b45]">{p.author}</p>
+                          <p className="mt-0.5 text-[10px] text-[#8a9691]">{dateLabel(p.createdAt)}</p>
+                        </div>
+                      </div>
+                      <Badge tone="blue">{p.category || 'Community'}</Badge>
+                    </div>
+                    <h2 className="mt-4 font-display text-[16px] font-bold tracking-tight text-[#34423d]">{p.title}</h2>
+                    <p className="mt-2 whitespace-pre-wrap text-[12px] leading-6 text-[#687671]">{p.body}</p>
+                    <div className="mt-4 flex items-center gap-4 border-t border-[#eef1ef] pt-3">
+                      <span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]">
+                        <TrendingUp size={13} /> {p.likes || 0} people found this useful
+                      </span>
+                      <span className="inline-flex items-center gap-1.5 text-[10px] text-[#82908a]">
+                        <MessageSquareText size={13} /> {p.comments?.length || 0} replies
+                      </span>
+                    </div>
+                    {p.comments?.length > 0 && (
+                      <div className="mt-2 space-y-2 border-l-2 border-[#e6eee8] pl-3">
+                        {p.comments.map((c: AnyRecord) => (
+                          <div key={c.id} className="rounded-lg bg-[#f8faf8] px-3 py-2">
+                            <span className="text-[10px] font-bold text-[#53635c]">{c.author}</span>
+                            <span className="ml-2 text-[9px] text-[#9aa49f]">{dateLabel(c.createdAt)}</span>
+                            <p className="mt-1 text-[11px] leading-5 text-[#6c7973]">{c.body}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    <PostCommentInput
+                      postId={p.id}
+                      isPending={createComment.isPending}
+                      onComment={(postId, body) => {
+                        createComment.mutate(
+                          { id: postId, data: { body } },
+                          {
+                            onSuccess: () => {
+                              qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() });
+                              setNotice({ tone: 'good', text: 'Reply added to the conversation.' });
+                            },
+                            onError: () => setNotice({ tone: 'bad', text: 'Your reply could not be posted. Try again.' }),
+                          }
+                        );
+                      }}
+                    />
+                  </div>
+                </Card>
+              ))
+            ) : (
+              <Card>
+                <Empty
+                  title="A good community starts with a question"
+                  detail="Share a founder challenge, a useful lesson, or a win worth passing on."
+                  button={<Btn onClick={() => setPostOpen(true)}><Plus size={14} /> Write the first post</Btn>}
+                />
+              </Card>
+            )}
+          </div>
+          <aside className="space-y-3">
+            <Card>
+              <div className="p-5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#edf4ef] text-[#43815f]">
+                  <Globe2 size={17} />
+                </div>
+                <h3 className="mt-3 text-[13px] font-bold">A room for builders</h3>
+                <p className="mt-1 text-[11px] leading-5 text-[#7c8983]">Ask openly, give context, and share the playbook you wish you had sooner.</p>
+                <Btn kind="soft" className="mt-4 w-full" onClick={() => setPostOpen(true)}>
+                  <Plus size={13} /> Start a post
+                </Btn>
+              </div>
+            </Card>
+            <Card>
+              <CardTitle title="Good community habits" />
+              <div className="space-y-3 p-4">
+                <p className="flex gap-2 text-[10px] leading-4 text-[#687670]">
+                  <Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Include context so answers can be useful.
+                </p>
+                <p className="flex gap-2 text-[10px] leading-4 text-[#687670]">
+                  <Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Give feedback generously and specifically.
+                </p>
+                <p className="flex gap-2 text-[10px] leading-4 text-[#687670]">
+                  <Check size={13} className="mt-0.5 shrink-0 text-[#41825e]" /> Share what worked, not just what should.
+                </p>
+              </div>
+            </Card>
+          </aside>
+        </div>
+        {postOpen && (
+          <Dialog title="Start a conversation" onClose={() => setPostOpen(false)}>
+            <form
+              className="space-y-4 p-5"
+              onSubmit={e => {
+                e.preventDefault();
+                createPost.mutate(
+                  { data: postForm },
+                  {
+                    onSuccess: () => {
+                      qc.invalidateQueries({ queryKey: getListCommunityPostsQueryKey() });
+                      setPostOpen(false);
+                      setPostForm({ title: '', body: '', category: 'Founder question' });
+                      setNotice({ tone: 'good', text: 'Your post is live in the community.' });
+                    },
+                    onError: () => setNotice({ tone: 'bad', text: 'Post could not be published. Check the details and try again.' }),
+                  }
+                );
+              }}
+            >
+              <FieldInput field={{ key: 'title', label: 'Title', required: true }} value={postForm.title} set={v => setPostForm({ ...postForm, title: v })} />
+              <FieldInput field={{ key: 'category', label: 'Topic', options: ['Founder question', 'Go-to-market', 'Hiring', 'Product', 'Milestone'] }} value={postForm.category} set={v => setPostForm({ ...postForm, category: v })} />
+              <FieldInput field={{ key: 'body', label: 'What’s on your mind?', type: 'textarea', required: true }} value={postForm.body} set={v => setPostForm({ ...postForm, body: v })} />
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+                <Btn kind="outline" onClick={() => setPostOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={createPost.isPending}>
+                  <Send size={14} /> {createPost.isPending ? 'Publishing…' : 'Publish post'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+      </>
+    );
   }
 
   function SuperAdminPage() {
@@ -2184,7 +2794,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   switch (path) {
     case '/dashboard': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Dashboard />; break;
     case '/contacts': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="contacts" />; break;
-    case '/companies': content = <ResourcePage entity="companies" />; break;
+    case '/companies': content = !isAdmin ? <Redirect to="/dashboard" /> : <ResourcePage entity="companies" />; break;
     case '/deals': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="deals" />; break;
     case '/tasks': content = <ResourcePage entity="tasks" />; break;
     case '/analytics': content = <Redirect to={member?.role === 'super_admin' ? '/super-admin' : '/dashboard'} />; break;

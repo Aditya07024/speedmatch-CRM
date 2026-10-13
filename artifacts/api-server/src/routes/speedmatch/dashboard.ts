@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, ne } from "drizzle-orm";
 import {
   activitiesTable,
   contactsTable,
@@ -117,6 +117,7 @@ router.get("/dashboard/activity", async (_req, res): Promise<void> => {
   const rows = await db
     .select()
     .from(activitiesTable)
+    .where(ne(activitiesTable.kind, "superadmin"))
     .orderBy(desc(activitiesTable.createdAt))
     .limit(20);
   res.json(
