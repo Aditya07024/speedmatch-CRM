@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { MutationCache, QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { MutationCache, QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import { Route, Switch, Redirect, Router as WouterRouter, Link, useLocation } from 'wouter';
 import { ClerkProvider, SignIn as ClerkSignIn, SignUp as ClerkSignUp, useUser } from '@clerk/clerk-react';
 import {
@@ -9,7 +9,7 @@ import {
   Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
   Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText,
   ShieldAlert, KeyRound, AlertCircle, UserCheck, Download, Kanban, List, Trophy, Layers,
-  Phone, Video, FileSpreadsheet
+  Phone, Video, FileSpreadsheet, NotebookPen, StickyNote, Pin, Share2, Copy, HelpCircle, LifeBuoy, MessageSquareHeart, Tag
 } from 'lucide-react';
 import {
   useGetDashboardSummary, getGetDashboardSummaryQueryKey, useGetDashboardActivity, getGetDashboardActivityQueryKey,
@@ -451,10 +451,12 @@ const navGroups = [
     { label: 'Companies', href: '/companies', icon: Building2 },
     { label: 'Deals', href: '/deals', icon: BriefcaseBusiness },
     { label: 'Tasks', href: '/tasks', icon: ListTodo },
+    { label: 'Notes', href: '/notes', icon: NotebookPen },
   ] },
   { label: 'Connect', items: [
     { label: 'Inbox', href: '/inbox', icon: Inbox },
     { label: 'Community', href: '/community', icon: Compass },
+    { label: 'Support & Feedback', href: '/support', icon: HelpCircle },
   ] },
   { label: 'Manage', items: [{ label: 'Team', href: '/team', icon: Users }] },
 ];
@@ -855,7 +857,9 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
         { label: 'Workspaces & Access', href: '/super-admin', icon: ShieldCheck },
         { label: 'Companies', href: '/companies', icon: Building2 },
         { label: 'Tasks', href: '/tasks', icon: ListTodo },
+        { label: 'Notes', href: '/notes', icon: NotebookPen },
         { label: 'Community', href: '/community', icon: Compass },
+        { label: 'Support & Reports', href: '/support', icon: HelpCircle },
       ],
     },
   ] : navGroups.map(group => ({
@@ -969,11 +973,11 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const dash = useGetDashboardSummary(queryOpts(getGetDashboardSummaryQueryKey(), path === '/dashboard', 30_000));
   const activity = useGetDashboardActivity(queryOpts(getGetDashboardActivityQueryKey(), path === '/dashboard', 30_000));
   const analytics = useGetAnalytics(queryOpts(getGetAnalyticsQueryKey(), path === '/dashboard', 30_000));
-  const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts' || path === '/dashboard'));
-  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), (path === '/companies' || path === '/dashboard') && isAdmin));
-  const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals' || path === '/dashboard'));
-  const tasks = useListTasks(undefined, queryOpts(getListTasksQueryKey(), path === '/tasks' || path === '/dashboard'));
-  const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team' || path === '/inbox' || path === '/dashboard'));
+  const contacts = useListContacts(undefined, queryOpts(getListContactsQueryKey(), path === '/contacts' || path === '/dashboard', 10_000));
+  const companies = useListCompanies(undefined, queryOpts(getListCompaniesQueryKey(), (path === '/companies' || path === '/dashboard') && isAdmin, 10_000));
+  const deals = useListDeals(undefined, queryOpts(getListDealsQueryKey(), path === '/deals' || path === '/dashboard', 10_000));
+  const tasks = useListTasks(undefined, queryOpts(getListTasksQueryKey(), path === '/tasks' || path === '/dashboard', 10_000));
+  const members = useListMembers(queryOpts(getListMembersQueryKey(), path === '/team' || path === '/inbox' || path === '/dashboard', 10_000));
   const requests = useListJoinRequests({ query: { enabled: approved && isAdmin && path === '/team', queryKey: getListJoinRequestsQueryKey() } });
   const conversations = useListConversations(queryOpts(getListConversationsQueryKey(), path === '/inbox', 10_000));
   const posts = useListCommunityPosts(queryOpts(getListCommunityPostsQueryKey(), path === '/community', 30_000));
@@ -2790,6 +2794,1180 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     </>;
   }
 
+  function NotesPage() {
+    const isSuperAdmin = member?.role === 'super_admin';
+    const [noteFilter, setNoteFilter] = useState<'all' | 'mine' | 'shared' | 'pinned'>('all');
+    const [noteCategory, setNoteCategory] = useState<string>('all');
+    const [noteSearch, setNoteSearch] = useState<string>('');
+    const [modalOpen, setModalOpen] = useState(false);
+    const [editingNote, setEditingNote] = useState<AnyRecord | null>(null);
+    const [copiedId, setCopiedId] = useState<number | null>(null);
+    const [saving, setSaving] = useState(false);
+    const [togglingShareId, setTogglingShareId] = useState<number | null>(null);
+    const [togglingPinId, setTogglingPinId] = useState<number | null>(null);
+    const [deletingId, setDeletingId] = useState<number | null>(null);
+
+    const [form, setForm] = useState({
+      title: '',
+      content: '',
+      category: 'General',
+      color: 'default',
+      isPinned: false,
+      isShared: false,
+    });
+
+    const { data: notesList = [], isLoading, refetch } = useQuery<AnyRecord[]>({
+      queryKey: ['speedmatch-notes', noteFilter, noteCategory, noteSearch],
+      queryFn: async () => {
+        const params = new URLSearchParams();
+        if (noteFilter && noteFilter !== 'all') params.set('filter', noteFilter);
+        if (noteCategory && noteCategory !== 'all') params.set('category', noteCategory);
+        if (noteSearch) params.set('search', noteSearch);
+        const res = await fetch(`/api/notes?${params.toString()}`, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load notes');
+        return (await res.json()) as AnyRecord[];
+      },
+      refetchInterval: 10_000,
+    });
+
+    const categories = [
+      'All Topics',
+      'General',
+      'Meeting Notes',
+      'Strategy & Pitch',
+      'Ideas & Brainstorm',
+      'Call Log',
+      'Code & Scratchpad',
+      'Important Links',
+      'Checklist',
+    ];
+
+    const openCreateModal = () => {
+      setEditingNote(null);
+      setForm({
+        title: '',
+        content: '',
+        category: 'General',
+        color: 'default',
+        isPinned: false,
+        isShared: false,
+      });
+      setModalOpen(true);
+    };
+
+    const openEditModal = (note: AnyRecord) => {
+      setEditingNote(note);
+      setForm({
+        title: note.title || '',
+        content: note.content || '',
+        category: note.category || 'General',
+        color: note.color || 'default',
+        isPinned: Boolean(note.isPinned),
+        isShared: Boolean(note.isShared),
+      });
+      setModalOpen(true);
+    };
+
+    const handleSaveNote = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!form.title.trim()) return;
+      setSaving(true);
+      try {
+        const url = editingNote ? `/api/notes/${editingNote.id}` : '/api/notes';
+        const method = editingNote ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: form.title.trim(),
+            content: form.content,
+            category: form.category,
+            color: form.color,
+            isPinned: form.isPinned ? 1 : 0,
+            isShared: form.isShared ? 1 : 0,
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to save note');
+        }
+        await refetch();
+        setModalOpen(false);
+        setNotice({
+          tone: 'good',
+          text: editingNote
+            ? 'Note updated successfully.'
+            : form.isShared
+            ? 'Note created and shared with your workspace team!'
+            : 'Private note saved to your personal scratchpad.',
+        });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not save note.' });
+      } finally {
+        setSaving(false);
+      }
+    };
+
+    const handleToggleShare = async (note: AnyRecord) => {
+      setTogglingShareId(note.id);
+      try {
+        const res = await fetch(`/api/notes/${note.id}/toggle-share`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to toggle share status');
+        }
+        const updated = await res.json();
+        await refetch();
+        setNotice({
+          tone: 'good',
+          text: updated.isShared
+            ? `“${updated.title}” is now shared with your workspace team.`
+            : `“${updated.title}” is now private to you.`,
+        });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not update note sharing.' });
+      } finally {
+        setTogglingShareId(null);
+      }
+    };
+
+    const handleTogglePin = async (note: AnyRecord) => {
+      setTogglingPinId(note.id);
+      try {
+        const res = await fetch(`/api/notes/${note.id}/toggle-pin`, {
+          method: 'POST',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to toggle pin');
+        }
+        await refetch();
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not toggle pin.' });
+      } finally {
+        setTogglingPinId(null);
+      }
+    };
+
+    const handleDeleteNote = async (note: AnyRecord) => {
+      if (!window.confirm(`Are you sure you want to delete note “${note.title}”?`)) return;
+      setDeletingId(note.id);
+      try {
+        const res = await fetch(`/api/notes/${note.id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to delete note');
+        }
+        await refetch();
+        setNotice({ tone: 'good', text: 'Note deleted.' });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not delete note.' });
+      } finally {
+        setDeletingId(null);
+      }
+    };
+
+    const handleCopyContent = (note: AnyRecord) => {
+      const textToCopy = `${note.title}\n\n${note.content || ''}`;
+      navigator.clipboard.writeText(textToCopy);
+      setCopiedId(note.id);
+      setTimeout(() => setCopiedId(null), 2000);
+    };
+
+    const getColorClass = (color: string) => {
+      switch (color) {
+        case 'emerald':
+          return {
+            card: 'border-[#c8e6d5] bg-[#f7fbf8] hover:border-[#96d1af]',
+            header: 'border-[#dff0e6] bg-[#edf7f1]',
+            badge: 'bg-[#ddf2e5] text-[#206945]',
+            accent: 'bg-[#28785b]',
+          };
+        case 'amber':
+          return {
+            card: 'border-[#fbe2b5] bg-[#fffcf5] hover:border-[#f9cb79]',
+            header: 'border-[#faedd3] bg-[#fdf6e7]',
+            badge: 'bg-[#fcedcf] text-[#8c5d14]',
+            accent: 'bg-[#e59b20]',
+          };
+        case 'blue':
+          return {
+            card: 'border-[#cbe1f7] bg-[#f6fafe] hover:border-[#95c2f0]',
+            header: 'border-[#dfeaf8] bg-[#edf4fd]',
+            badge: 'bg-[#dce9fc] text-[#1c558c]',
+            accent: 'bg-[#2b75be]',
+          };
+        case 'purple':
+          return {
+            card: 'border-[#e4d6f8] bg-[#faf7ff] hover:border-[#caaef2]',
+            header: 'border-[#eee3fb] bg-[#f4ebfe]',
+            badge: 'bg-[#ede0fd] text-[#5e2b9c]',
+            accent: 'bg-[#7a3dbf]',
+          };
+        case 'rose':
+          return {
+            card: 'border-[#f9ceca] bg-[#fef7f6] hover:border-[#f3a097]',
+            header: 'border-[#f8dedb] bg-[#fdeeed]',
+            badge: 'bg-[#fcdedb] text-[#9b2b22]',
+            accent: 'bg-[#c53b30]',
+          };
+        default:
+          return {
+            card: 'border-[#e2e9e5] bg-white hover:border-[#bdd7c8]',
+            header: 'border-[#edf0ee] bg-[#fbfdfc]',
+            badge: 'bg-[#f0f3f2] text-[#556360]',
+            accent: 'bg-[#51645e]',
+          };
+      }
+    };
+
+    const totalCount = notesList.length;
+    const myCount = notesList.filter(n => n.authorId === member?.id).length;
+    const sharedCount = notesList.filter(n => Boolean(n.isShared)).length;
+    const pinnedCount = notesList.filter(n => Boolean(n.isPinned)).length;
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title="Notes & Scratchpad"
+          description="Capture meeting notes, ideas, code snippets, strategies, and important links. Keep them private to you or share them with your team."
+          action={
+            <div className="flex items-center gap-3">
+              <Btn onClick={openCreateModal}>
+                <Plus size={15} /> New Note
+              </Btn>
+            </div>
+          }
+        />
+
+        {/* Quick Metrics Bar */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">Total Notes</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#23332e]">{totalCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">My Notes</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#28785b]">{myCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">Shared with Team</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#2b75be]">{sharedCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">Pinned to Top</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#e59b20]">{pinnedCount}</div>
+          </Card>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="flex flex-col gap-3 rounded-xl border border-[#e2e9e5] bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          {/* Main Filter Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: 'all', label: 'All Notes', count: totalCount },
+              { id: 'mine', label: 'My Notes', count: myCount },
+              { id: 'shared', label: 'Shared with Team', count: sharedCount },
+              { id: 'pinned', label: 'Pinned', count: pinnedCount },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setNoteFilter(tab.id as any)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+                  noteFilter === tab.id
+                    ? 'bg-[#28785b] text-white shadow-sm'
+                    : 'bg-[#f4f7f5] text-[#556560] hover:bg-[#e9eee9]'
+                }`}
+              >
+                <span>{tab.label}</span>
+                <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${noteFilter === tab.id ? 'bg-white/25 text-white' : 'bg-black/5 text-[#6a7974]'}`}>
+                  {tab.count}
+                </span>
+              </button>
+            ))}
+          </div>
+
+          {/* Search Bar */}
+          <div className="relative min-w-[240px]">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b9993]" />
+            <input
+              type="text"
+              placeholder="Search notes, tags, content…"
+              value={noteSearch}
+              onChange={e => setNoteSearch(e.target.value)}
+              className="w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] py-1.5 pl-9 pr-3 text-[12px] text-[#2f3f3a] outline-none transition focus:border-[#70a88c] focus:ring-2 focus:ring-[#28785b]/10"
+            />
+          </div>
+        </div>
+
+        {/* Category Filter Chips */}
+        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+          <span className="flex shrink-0 items-center gap-1 text-[11px] font-bold text-[#808f8a]">
+            <Tag size={12} /> Topic:
+          </span>
+          {categories.map(cat => {
+            const val = cat === 'All Topics' ? 'all' : cat;
+            const active = noteCategory === val;
+            return (
+              <button
+                key={cat}
+                type="button"
+                onClick={() => setNoteCategory(val)}
+                className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition ${
+                  active
+                    ? 'border-[#28785b] bg-[#edf6f1] text-[#22634b]'
+                    : 'border-[#dfe6e2] bg-white text-[#657570] hover:border-[#b8ccc2]'
+                }`}
+              >
+                {cat}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Notes Grid */}
+        {isLoading ? (
+          <LoadingRows />
+        ) : notesList.length === 0 ? (
+          <Card className="mx-auto max-w-lg p-10 text-center">
+            <Empty
+              title="No notes found"
+              detail={
+                noteSearch || noteCategory !== 'all' || noteFilter !== 'all'
+                  ? 'No notes match your current filters. Try clearing filters or search terms.'
+                  : 'Capture anything here — meeting records, brainstorm ideas, code snippets, or team strategy.'
+              }
+              button={
+                <Btn onClick={openCreateModal}>
+                  <Plus size={14} /> Create your first note
+                </Btn>
+              }
+            />
+          </Card>
+        ) : (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {notesList.map(note => {
+              const colors = getColorClass(note.color || 'default');
+              const isOwner = note.authorId === member?.id;
+              const canEdit = isOwner || member?.role === 'admin' || isSuperAdmin;
+              const isCopied = copiedId === note.id;
+
+              return (
+                <div
+                  key={note.id}
+                  className={`group relative flex flex-col justify-between rounded-xl border p-5 shadow-sm transition hover:shadow-md ${colors.card}`}
+                >
+                  <div>
+                    {/* Header: Category Badge + Pin Button + Sharing Pill */}
+                    <div className="flex items-center justify-between gap-2 border-b pb-3" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider ${colors.badge}`}>
+                          {note.category || 'General'}
+                        </span>
+                        {note.isPinned ? (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-bold text-amber-800" title="Pinned to top">
+                            <Pin size={10} className="fill-amber-600 text-amber-700" /> Pinned
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleTogglePin(note)}
+                            disabled={togglingPinId === note.id}
+                            title={note.isPinned ? 'Unpin from top' : 'Pin to top'}
+                            className={`rounded-md p-1 transition ${
+                              note.isPinned
+                                ? 'text-amber-600 hover:bg-amber-100'
+                                : 'text-[#8b9993] hover:bg-black/5 hover:text-[#2d3d37]'
+                            }`}
+                          >
+                            <Pin size={13} className={note.isPinned ? 'fill-amber-500' : ''} />
+                          </button>
+                        )}
+
+                        {note.isShared ? (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-md bg-[#e3f4e9] px-2 py-0.5 text-[10px] font-bold text-[#1f6643]"
+                            title={isOwner ? 'Visible to everyone on your workspace team' : `Shared by ${note.authorName}`}
+                          >
+                            <Share2 size={10} />
+                            {isOwner ? 'Shared with Team' : `Shared by ${note.authorName?.split(' ')[0] || 'Teammate'}`}
+                          </span>
+                        ) : (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-md bg-slate-100 px-2 py-0.5 text-[10px] font-bold text-slate-600"
+                            title="Private to you only"
+                          >
+                            <LockKeyhole size={10} /> Private
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Note Title */}
+                    <h3 className="mt-3.5 font-display text-[16px] font-bold leading-snug tracking-tight text-[#22322d]">
+                      {note.title}
+                    </h3>
+
+                    {/* Note Content preview (supports monospace/plain multiline) */}
+                    <div className="mt-2.5 max-h-56 overflow-y-auto whitespace-pre-wrap font-sans text-[13px] leading-relaxed text-[#495954]">
+                      {note.content || <span className="italic text-[#92a09b]">No note content.</span>}
+                    </div>
+                  </div>
+
+                  {/* Footer & Actions */}
+                  <div className="mt-5 border-t pt-3.5" style={{ borderColor: 'rgba(0,0,0,0.06)' }}>
+                    <div className="flex items-center justify-between text-[11px] text-[#788882]">
+                      <span title={note.authorEmail}>
+                        {note.authorName || 'Teammate'} · {new Date(note.updatedAt || note.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                      </span>
+
+                      <div className="flex items-center gap-1">
+                        {/* Copy button */}
+                        <button
+                          type="button"
+                          onClick={() => handleCopyContent(note)}
+                          title="Copy note to clipboard"
+                          className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-[#5a6a65] transition hover:bg-black/5 hover:text-[#21312c]"
+                        >
+                          {isCopied ? (
+                            <>
+                              <Check size={12} className="text-[#28785b]" />
+                              <span className="text-[#28785b]">Copied!</span>
+                            </>
+                          ) : (
+                            <>
+                              <Copy size={12} />
+                              <span>Copy</span>
+                            </>
+                          )}
+                        </button>
+
+                        {/* Quick 1-click Share / Unshare Toggle */}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleToggleShare(note)}
+                            disabled={togglingShareId === note.id}
+                            title={note.isShared ? 'Make note private (only you)' : 'Share note with your workspace team'}
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
+                              note.isShared
+                                ? 'bg-[#e2f1e8] text-[#226645] hover:bg-[#d4e9dc]'
+                                : 'bg-black/5 text-[#556560] hover:bg-black/10 hover:text-[#22322d]'
+                            }`}
+                          >
+                            <Share2 size={12} />
+                            <span>{note.isShared ? 'Shared' : 'Share'}</span>
+                          </button>
+                        )}
+
+                        {/* Edit Button */}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => openEditModal(note)}
+                            title="Edit note"
+                            className="rounded-md p-1.5 text-[#73837e] transition hover:bg-black/5 hover:text-[#22322d]"
+                          >
+                            <Pencil size={13} />
+                          </button>
+                        )}
+
+                        {/* Delete Button */}
+                        {canEdit && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteNote(note)}
+                            disabled={deletingId === note.id}
+                            title="Delete note"
+                            className="rounded-md p-1.5 text-[#ad544b] transition hover:bg-rose-100/70"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Create / Edit Note Modal */}
+        {modalOpen && (
+          <Dialog
+            title={editingNote ? 'Edit Note' : 'Create Note or Scratchpad'}
+            onClose={() => setModalOpen(false)}
+            width="max-w-2xl"
+          >
+            <form onSubmit={handleSaveNote} className="space-y-4 p-5">
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Note Title <span className="text-rose-500">*</span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="E.g., Q4 Enterprise Outreach Strategy or Product Feedback Summary"
+                    value={form.title}
+                    onChange={e => setForm(f => ({ ...f, title: e.target.value }))}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] text-[#2d3d38] outline-none transition focus:border-[#70a88c] focus:ring-2 focus:ring-[#28785b]/10"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Topic / Category
+                  <select
+                    value={form.category}
+                    onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2d3d38] outline-none transition focus:border-[#70a88c]"
+                  >
+                    {categories.filter(c => c !== 'All Topics').map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </label>
+
+                <div>
+                  <label className="block text-[12px] font-bold text-[#354641]">
+                    Color Accent
+                  </label>
+                  <div className="mt-2 flex items-center gap-2">
+                    {[
+                      { id: 'default', bg: 'bg-[#556360]', label: 'Default' },
+                      { id: 'emerald', bg: 'bg-[#28785b]', label: 'Emerald' },
+                      { id: 'amber', bg: 'bg-[#e59b20]', label: 'Amber' },
+                      { id: 'blue', bg: 'bg-[#2b75be]', label: 'Blue' },
+                      { id: 'purple', bg: 'bg-[#7a3dbf]', label: 'Purple' },
+                      { id: 'rose', bg: 'bg-[#c53b30]', label: 'Rose' },
+                    ].map(c => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setForm(f => ({ ...f, color: c.id }))}
+                        title={c.label}
+                        className={`h-6 w-6 rounded-full transition ${c.bg} ${
+                          form.color === c.id ? 'ring-2 ring-black ring-offset-2' : 'opacity-70 hover:opacity-100'
+                        }`}
+                      />
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Note Content (Store anything)
+                  <textarea
+                    rows={8}
+                    placeholder="Type or paste anything: meeting bullet points, strategies, scratch notes, code snippets, links, or follow-up checklists…"
+                    value={form.content}
+                    onChange={e => setForm(f => ({ ...f, content: e.target.value }))}
+                    className="mt-1.5 w-full resize-y rounded-xl border border-[#dce5e0] bg-[#fbfcfb] p-3 text-[13px] leading-relaxed text-[#2d3d38] outline-none transition focus:border-[#70a88c] focus:ring-2 focus:ring-[#28785b]/10"
+                  />
+                </label>
+              </div>
+
+              {/* Privacy & Sharing Controls */}
+              <div className="space-y-3 rounded-xl border border-[#e1e9e4] bg-[#f8faf9] p-4 text-[12px]">
+                <label className="flex cursor-pointer items-start gap-3">
+                  <input
+                    type="checkbox"
+                    checked={form.isShared}
+                    onChange={e => setForm(f => ({ ...f, isShared: e.target.checked }))}
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-[#28785b] focus:ring-[#28785b]"
+                  />
+                  <div>
+                    <span className="font-bold text-[#253631]">Share this note with workspace team</span>
+                    <p className="mt-0.5 text-[11px] text-[#63736e]">
+                      {form.isShared
+                        ? 'Active: Everyone in your workspace team will be able to see and learn from this note.'
+                        : 'Disabled (Default): Strictly private to you. No teammate will see this note unless you enable sharing.'}
+                    </p>
+                  </div>
+                </label>
+
+                <label className="flex cursor-pointer items-start gap-3 border-t border-[#e8eeea] pt-2.5">
+                  <input
+                    type="checkbox"
+                    checked={form.isPinned}
+                    onChange={e => setForm(f => ({ ...f, isPinned: e.target.checked }))}
+                    className="mt-1 h-4 w-4 rounded border-gray-300 text-[#28785b] focus:ring-[#28785b]"
+                  />
+                  <div>
+                    <span className="font-bold text-[#253631]">Pin note to top</span>
+                    <p className="mt-0.5 text-[11px] text-[#63736e]">
+                      Keep this note pinned to the top of your dashboard and scratchpad for fast access.
+                    </p>
+                  </div>
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+                <Btn kind="outline" onClick={() => setModalOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={saving || !form.title.trim()}>
+                  {saving ? 'Saving…' : editingNote ? 'Save Changes' : 'Create Note'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
+
+  function SupportPage() {
+    const isSuperAdmin = member?.role === 'super_admin';
+    const [supportFilter, setSupportFilter] = useState<string>('all');
+    const [supportType, setSupportType] = useState<string>('all');
+    const [supportSearch, setSupportSearch] = useState<string>('');
+    const [createOpen, setCreateOpen] = useState(false);
+    const [submitting, setSubmitting] = useState(false);
+    const [replyModal, setReplyModal] = useState<AnyRecord | null>(null);
+    const [replyStatus, setReplyStatus] = useState<string>('Resolved');
+    const [replyText, setReplyText] = useState<string>('');
+    const [savingReply, setSavingReply] = useState(false);
+    const [deletingTicketId, setDeletingTicketId] = useState<number | null>(null);
+
+    const [ticketForm, setTicketForm] = useState({
+      type: 'Suggestion',
+      priority: 'Medium',
+      subject: '',
+      message: '',
+    });
+
+    const { data: ticketsList = [], isLoading, refetch } = useQuery<AnyRecord[]>({
+      queryKey: ['speedmatch-support', supportFilter, supportType, supportSearch],
+      queryFn: async () => {
+        const params = new URLSearchParams();
+        if (supportFilter && supportFilter !== 'all') params.set('status', supportFilter);
+        if (supportType && supportType !== 'all') params.set('type', supportType);
+        if (supportSearch) params.set('search', supportSearch);
+        const res = await fetch(`/api/support/tickets?${params.toString()}`, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load tickets');
+        return (await res.json()) as AnyRecord[];
+      },
+      refetchInterval: 10_000,
+    });
+
+    const handleCreateTicket = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!ticketForm.subject.trim() || !ticketForm.message.trim()) return;
+      setSubmitting(true);
+      try {
+        const res = await fetch('/api/support/tickets', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(ticketForm),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to submit ticket');
+        }
+        await refetch();
+        setCreateOpen(false);
+        setTicketForm({
+          type: 'Suggestion',
+          priority: 'Medium',
+          subject: '',
+          message: '',
+        });
+        setNotice({
+          tone: 'good',
+          text: 'Your submission has been sent directly to the Super Admin. You can track status and responses right here.',
+        });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not submit ticket.' });
+      } finally {
+        setSubmitting(false);
+      }
+    };
+
+    const openReplyModal = (ticket: AnyRecord) => {
+      setReplyModal(ticket);
+      setReplyStatus(ticket.status || 'Resolved');
+      setReplyText(ticket.adminResponse || '');
+    };
+
+    const handleSaveReply = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!replyModal) return;
+      setSavingReply(true);
+      try {
+        const res = await fetch(`/api/support/tickets/${replyModal.id}`, {
+          method: 'PUT',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: replyStatus,
+            adminResponse: replyText.trim(),
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to update ticket');
+        }
+        await refetch();
+        setReplyModal(null);
+        setNotice({
+          tone: 'good',
+          text: `Ticket #${replyModal.id} updated and response saved for ${replyModal.userName}.`,
+        });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not update ticket.' });
+      } finally {
+        setSavingReply(false);
+      }
+    };
+
+    const handleDeleteTicket = async (ticket: AnyRecord) => {
+      if (!window.confirm(`Delete ticket #${ticket.id} (${ticket.subject})?`)) return;
+      setDeletingTicketId(ticket.id);
+      try {
+        const res = await fetch(`/api/support/tickets/${ticket.id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || 'Failed to delete ticket');
+        }
+        await refetch();
+        setNotice({ tone: 'good', text: 'Ticket deleted.' });
+      } catch (err: any) {
+        setNotice({ tone: 'bad', text: err.message || 'Could not delete ticket.' });
+      } finally {
+        setDeletingTicketId(null);
+      }
+    };
+
+    const getStatusBadge = (status: string) => {
+      switch (status) {
+        case 'Resolved':
+          return (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#e3f5ea] px-2 py-0.5 text-[11px] font-bold text-[#1f6643]">
+              <CheckCheck size={12} /> Resolved
+            </span>
+          );
+        case 'In Review':
+          return (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#e3eefc] px-2 py-0.5 text-[11px] font-bold text-[#1d5490]">
+              <ActivityIcon size={12} /> In Review
+            </span>
+          );
+        case 'Closed':
+          return (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#f0f3f1] px-2 py-0.5 text-[11px] font-bold text-[#62716c]">
+              Closed
+            </span>
+          );
+        default:
+          return (
+            <span className="inline-flex items-center gap-1 rounded-md bg-[#fff3db] px-2 py-0.5 text-[11px] font-bold text-[#8d5e16]">
+              <Clock3 size={12} /> Pending Review
+            </span>
+          );
+      }
+    };
+
+    const getTypeBadge = (type: string) => {
+      const styles: Record<string, string> = {
+        Suggestion: 'bg-[#e7f5ef] text-[#216747]',
+        'Bug Report': 'bg-[#fdeeed] text-[#9b2a21]',
+        'Feature Request': 'bg-[#f2ebfd] text-[#6329a1]',
+        'Help / Question': 'bg-[#e7f0fa] text-[#1e528b]',
+        Feedback: 'bg-[#eaf4f2] text-[#245f5a]',
+      };
+      return (
+        <span className={`inline-flex items-center rounded-md px-2 py-0.5 text-[11px] font-bold ${styles[type] || 'bg-gray-100 text-gray-700'}`}>
+          {type}
+        </span>
+      );
+    };
+
+    const getPriorityBadge = (p: string) => {
+      const styles: Record<string, string> = {
+        Urgent: 'bg-rose-100 text-rose-800 font-bold',
+        High: 'bg-amber-100 text-amber-800 font-bold',
+        Medium: 'bg-slate-100 text-slate-700',
+        Low: 'bg-slate-50 text-slate-500',
+      };
+      return (
+        <span className={`inline-flex items-center rounded-md px-1.5 py-0.5 text-[10px] ${styles[p] || 'bg-slate-100 text-slate-600'}`}>
+          {p} Priority
+        </span>
+      );
+    };
+
+    // Calculate ticket stats
+    const totalCount = ticketsList.length;
+    const pendingCount = ticketsList.filter(t => t.status === 'Pending').length;
+    const inReviewCount = ticketsList.filter(t => t.status === 'In Review').length;
+    const resolvedCount = ticketsList.filter(t => t.status === 'Resolved').length;
+
+    return (
+      <div className="space-y-6">
+        <PageHeader
+          title={isSuperAdmin ? 'Support & Suggestions Hub (Super Admin)' : 'Support & Suggestions'}
+          description={
+            isSuperAdmin
+              ? 'Central dispatch for all platform suggestions, bug reports, feature requests, and feedback submitted by workspace members.'
+              : 'Direct communication line to the SpeedMatch Super Admin. Submit suggestions, report bugs, ask for help, or recommend features.'
+          }
+          action={
+            <div className="flex items-center gap-3">
+              <Btn onClick={() => setCreateOpen(true)}>
+                <Plus size={15} /> Submit Suggestion or Report
+              </Btn>
+            </div>
+          }
+        />
+
+        {/* Stats Row */}
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">
+              {isSuperAdmin ? 'Total System Tickets' : 'My Submissions'}
+            </div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#23332e]">{totalCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">Pending Review</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#d48817]">{pendingCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">In Review</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#236bb5]">{inReviewCount}</div>
+          </Card>
+          <Card className="p-3.5">
+            <div className="text-[11px] font-semibold text-[#73827d]">Resolved</div>
+            <div className="mt-1 font-display text-[22px] font-bold text-[#28785b]">{resolvedCount}</div>
+          </Card>
+        </div>
+
+        {/* Toolbar & Filters */}
+        <div className="flex flex-col gap-3 rounded-xl border border-[#e2e9e5] bg-white p-4 shadow-sm sm:flex-row sm:items-center sm:justify-between">
+          {/* Status Tabs */}
+          <div className="flex flex-wrap items-center gap-1.5">
+            {[
+              { id: 'all', label: 'All Statuses' },
+              { id: 'Pending', label: 'Pending', count: pendingCount },
+              { id: 'In Review', label: 'In Review', count: inReviewCount },
+              { id: 'Resolved', label: 'Resolved', count: resolvedCount },
+              { id: 'Closed', label: 'Closed' },
+            ].map(tab => (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setSupportFilter(tab.id)}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
+                  supportFilter === tab.id
+                    ? 'bg-[#28785b] text-white shadow-sm'
+                    : 'bg-[#f4f7f5] text-[#556560] hover:bg-[#e9eee9]'
+                }`}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== undefined && (
+                  <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${supportFilter === tab.id ? 'bg-white/25 text-white' : 'bg-black/5 text-[#6a7974]'}`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {/* Type dropdown & Search */}
+          <div className="flex flex-wrap items-center gap-2">
+            <select
+              value={supportType}
+              onChange={e => setSupportType(e.target.value)}
+              className="rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-1.5 text-[12px] text-[#2d3d38] outline-none"
+            >
+              <option value="all">All Types</option>
+              <option value="Suggestion">Suggestions</option>
+              <option value="Bug Report">Bug Reports</option>
+              <option value="Feature Request">Feature Requests</option>
+              <option value="Help / Question">Help / Questions</option>
+              <option value="Feedback">Feedback</option>
+            </select>
+
+            <div className="relative min-w-[200px]">
+              <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#8b9993]" />
+              <input
+                type="text"
+                placeholder="Search tickets, subject…"
+                value={supportSearch}
+                onChange={e => setSupportSearch(e.target.value)}
+                className="w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] py-1.5 pl-9 pr-3 text-[12px] text-[#2f3f3a] outline-none transition focus:border-[#70a88c]"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Tickets List */}
+        {isLoading ? (
+          <LoadingRows />
+        ) : ticketsList.length === 0 ? (
+          <Card className="mx-auto max-w-lg p-10 text-center">
+            <Empty
+              title={isSuperAdmin ? 'No tickets to review' : 'No suggestions or reports yet'}
+              detail={
+                isSuperAdmin
+                  ? 'All user suggestions, reports, and questions have been processed or none match the selected filter.'
+                  : 'Have an idea to improve the platform or found an issue? Submit a ticket and the Super Admin will review it.'
+              }
+              button={
+                <Btn onClick={() => setCreateOpen(true)}>
+                  <Plus size={14} /> Submit a suggestion or report
+                </Btn>
+              }
+            />
+          </Card>
+        ) : (
+          <div className="space-y-4">
+            {ticketsList.map(ticket => {
+              const isAuthor = ticket.userId === member?.id;
+              const canDelete = isAuthor || isSuperAdmin;
+
+              return (
+                <Card key={ticket.id} className="p-5 transition hover:border-[#b8d4c5]">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-[11px] font-bold text-[#71817c]">
+                          #TKT-{ticket.id}
+                        </span>
+                        {getTypeBadge(ticket.type)}
+                        {getPriorityBadge(ticket.priority)}
+                        {getStatusBadge(ticket.status)}
+                      </div>
+
+                      <h3 className="font-display text-[16px] font-bold text-[#23332e]">
+                        {ticket.subject}
+                      </h3>
+
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-[#788882]">
+                        <span className="font-semibold text-[#40504b]">{ticket.userName}</span>
+                        <span>({ticket.userEmail})</span>
+                        {ticket.companyName && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-1 text-[#28785b]">
+                              <Building2 size={11} /> {ticket.companyName}
+                            </span>
+                          </>
+                        )}
+                        <span>·</span>
+                        <span>{new Date(ticket.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                    </div>
+
+                    {/* Action buttons */}
+                    <div className="flex items-center gap-2">
+                      {isSuperAdmin && (
+                        <Btn kind="soft" onClick={() => openReplyModal(ticket)}>
+                          <MessageSquareText size={13} /> {ticket.adminResponse ? 'Update Response' : 'Reply & Update Status'}
+                        </Btn>
+                      )}
+
+                      {canDelete && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteTicket(ticket)}
+                          disabled={deletingTicketId === ticket.id}
+                          title="Delete ticket"
+                          className="rounded-lg p-2 text-[#b05247] transition hover:bg-rose-50"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Ticket message content */}
+                  <div className="mt-3.5 rounded-lg border border-[#e8ecea] bg-[#fafcfb] p-3.5 text-[13px] leading-relaxed text-[#354641] whitespace-pre-wrap font-sans">
+                    {ticket.message}
+                  </div>
+
+                  {/* Super Admin Response Section */}
+                  {ticket.adminResponse ? (
+                    <div className="mt-3.5 rounded-xl border border-[#c4e4d1] bg-[#edf8f2] p-4 text-[12px] text-[#1c4e38]">
+                      <div className="flex items-center justify-between font-bold text-[#1a553a]">
+                        <span className="flex items-center gap-1.5">
+                          <ShieldCheck size={14} className="text-[#28785b]" />
+                          Official Super Admin Response
+                        </span>
+                        {ticket.respondedAt && (
+                          <span className="text-[10px] font-normal text-[#4c7b64]">
+                            {new Date(ticket.respondedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                          </span>
+                        )}
+                      </div>
+                      <p className="mt-2 whitespace-pre-wrap text-[13px] leading-relaxed text-[#224e3a]">
+                        {ticket.adminResponse}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="mt-3 text-[11px] text-[#80908b] italic">
+                      Awaiting review & response from Super Admin.
+                    </div>
+                  )}
+                </Card>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Modal: Submit Suggestion / Report */}
+        {createOpen && (
+          <Dialog
+            title="Submit Suggestion, Bug, or Feedback"
+            onClose={() => setCreateOpen(false)}
+            width="max-w-xl"
+          >
+            <form onSubmit={handleCreateTicket} className="space-y-4 p-5">
+              <div className="rounded-lg border border-[#d6e7dc] bg-[#f2f8f4] p-3.5 text-[12px] text-[#2c5841]">
+                Your submission will be routed directly to the <strong>Super Admin</strong>. You will receive official status updates and responses right here on your support dashboard.
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Submission Type
+                  <select
+                    value={ticketForm.type}
+                    onChange={e => setTicketForm(f => ({ ...f, type: e.target.value }))}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2d3d38] outline-none transition focus:border-[#70a88c]"
+                  >
+                    <option value="Suggestion">Suggestion (Idea to improve platform)</option>
+                    <option value="Bug Report">Bug Report (Something is broken)</option>
+                    <option value="Feature Request">Feature Request (New functionality)</option>
+                    <option value="Help / Question">Help / Question (How-to or question)</option>
+                    <option value="Feedback">General Feedback</option>
+                  </select>
+                </label>
+
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Priority
+                  <select
+                    value={ticketForm.priority}
+                    onChange={e => setTicketForm(f => ({ ...f, priority: e.target.value }))}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2d3d38] outline-none transition focus:border-[#70a88c]"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Subject <span className="text-rose-500">*</span>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Brief summary of your suggestion or issue"
+                    value={ticketForm.subject}
+                    onChange={e => setTicketForm(f => ({ ...f, subject: e.target.value }))}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3.5 py-2.5 text-[13px] text-[#2d3d38] outline-none transition focus:border-[#70a88c]"
+                  />
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Description & Details <span className="text-rose-500">*</span>
+                  <textarea
+                    required
+                    rows={5}
+                    placeholder="Provide details: what you want to see improved, steps to reproduce a bug, or questions for the Super Admin…"
+                    value={ticketForm.message}
+                    onChange={e => setTicketForm(f => ({ ...f, message: e.target.value }))}
+                    className="mt-1.5 w-full resize-y rounded-xl border border-[#dce5e0] bg-[#fbfcfb] p-3 text-[13px] leading-relaxed text-[#2d3d38] outline-none transition focus:border-[#70a88c]"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+                <Btn kind="outline" onClick={() => setCreateOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={submitting || !ticketForm.subject.trim() || !ticketForm.message.trim()}>
+                  <Send size={14} /> {submitting ? 'Submitting…' : 'Submit to Super Admin'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+
+        {/* Modal: Super Admin Reply & Status Change */}
+        {replyModal && (
+          <Dialog
+            title={`Reply to Ticket #${replyModal.id} — ${replyModal.subject}`}
+            onClose={() => setReplyModal(null)}
+            width="max-w-xl"
+          >
+            <form onSubmit={handleSaveReply} className="space-y-4 p-5">
+              <div className="rounded-lg border border-[#d6e7dc] bg-[#f2f8f4] p-3 text-[12px] text-[#2c5841]">
+                Replying to <strong>{replyModal.userName}</strong> ({replyModal.userEmail}) from <strong>{replyModal.companyName || 'Workspace'}</strong>.
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Update Status
+                  <select
+                    value={replyStatus}
+                    onChange={e => setReplyStatus(e.target.value)}
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[13px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="In Review">In Review</option>
+                    <option value="Resolved">Resolved</option>
+                    <option value="Closed">Closed</option>
+                  </select>
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Super Admin Official Response
+                  <textarea
+                    rows={6}
+                    placeholder="Write your official response to the user. They will see this prominently on their support dashboard."
+                    value={replyText}
+                    onChange={e => setReplyText(e.target.value)}
+                    className="mt-1.5 w-full resize-y rounded-xl border border-[#dce5e0] bg-[#fbfcfb] p-3 text-[13px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-4">
+                <Btn kind="outline" onClick={() => setReplyModal(null)}>Cancel</Btn>
+                <Btn type="submit" disabled={savingReply}>
+                  {savingReply ? 'Saving…' : 'Save Response & Update Status'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
+
   let content: ReactNode;
   switch (path) {
     case '/dashboard': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Dashboard />; break;
@@ -2797,10 +3975,12 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     case '/companies': content = !isAdmin ? <Redirect to="/dashboard" /> : <ResourcePage entity="companies" />; break;
     case '/deals': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="deals" />; break;
     case '/tasks': content = <ResourcePage entity="tasks" />; break;
+    case '/notes': content = <NotesPage />; break;
     case '/analytics': content = <Redirect to={member?.role === 'super_admin' ? '/super-admin' : '/dashboard'} />; break;
     case '/team': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Team />; break;
     case '/inbox': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <InboxPage />; break;
     case '/community': content = <Community />; break;
+    case '/support': content = <SupportPage />; break;
     case '/super-admin': content = <SuperAdminPage />; break;
     default: content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <NotFound />;
   }

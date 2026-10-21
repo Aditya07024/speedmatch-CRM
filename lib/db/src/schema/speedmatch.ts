@@ -186,3 +186,53 @@ export const activitiesTable = pgTable("speedmatch_activities", {
     .notNull()
     .defaultNow(),
 });
+
+export const notesTable = pgTable("speedmatch_notes", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  authorId: integer("author_id")
+    .notNull()
+    .references(() => teamMembersTable.id, { onDelete: "cascade" }),
+  authorName: text("author_name").notNull().default(""),
+  authorEmail: text("author_email").notNull().default(""),
+  title: text("title").notNull(),
+  content: text("content").notNull().default(""),
+  category: text("category").notNull().default("General"),
+  color: text("color").notNull().default("default"),
+  isPinned: integer("is_pinned").notNull().default(0),
+  isShared: integer("is_shared").notNull().default(0),
+  sharedWith: text("shared_with").notNull().default("all"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+export const supportTicketsTable = pgTable("speedmatch_support_tickets", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  userId: integer("user_id")
+    .notNull()
+    .references(() => teamMembersTable.id, { onDelete: "cascade" }),
+  userName: text("user_name").notNull().default(""),
+  userEmail: text("user_email").notNull().default(""),
+  userRole: text("user_role").notNull().default("member"),
+  companyName: text("company_name").notNull().default(""),
+  type: text("type").notNull().default("Suggestion"),
+  priority: text("priority").notNull().default("Medium"),
+  subject: text("subject").notNull(),
+  message: text("message").notNull(),
+  status: text("status").notNull().default("Pending"),
+  adminResponse: text("admin_response"),
+  respondedAt: timestamp("responded_at", { withTimezone: true }),
+  respondedBy: text("responded_by"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
