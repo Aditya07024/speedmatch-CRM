@@ -108,7 +108,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
           setClerkKey(data.publishableKey);
         }
       })
-      .catch(() => {});
+      .catch(() => { });
   }, [refresh]);
 
   const value: AuthState = {
@@ -129,14 +129,14 @@ function AuthProvider({ children }: { children: ReactNode }) {
       // 1. Invalidate backend session cookie first so no race can restore the session
       try {
         await fetch('/api/auth/sign-out', { method: 'POST', credentials: 'include' });
-      } catch {}
+      } catch { }
 
       // 2. Clear query client cache, local/session storage, and member state
       try {
         client.clear();
         localStorage.clear();
         sessionStorage.clear();
-      } catch {}
+      } catch { }
       setMember(null);
 
       // 3. Prepare sign-in redirect URL
@@ -148,7 +148,7 @@ function AuthProvider({ children }: { children: ReactNode }) {
           await window.Clerk.signOut({ redirectUrl: targetUrl });
           return;
         }
-      } catch {}
+      } catch { }
 
       // 5. Fallback navigation if Clerk is not used or did not redirect
       window.location.replace(`${basePath}/sign-in`);
@@ -180,7 +180,7 @@ function ClerkSyncBridge() {
         }).then(async () => {
           client.clear();
           await refresh();
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } else if (clerkLoaded && !isSignedIn) {
       lastSyncedId.current = null;
@@ -282,7 +282,7 @@ function UnauthorizedGate({ member }: { member: AnyRecord }) {
             window.location.reload();
           }
         }
-      } catch {}
+      } catch { }
     }, 3000);
     return () => clearInterval(timer);
   }, [refresh]);
@@ -445,19 +445,23 @@ type Field = { key: string; label: string; type?: string; options?: string[]; re
 type Notice = { tone: 'good' | 'bad' | 'info'; text: string } | null;
 
 const navGroups = [
-  { label: 'Workspace', items: [
-    { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
-    { label: 'Contacts', href: '/contacts', icon: ContactRound },
-    { label: 'Companies', href: '/companies', icon: Building2 },
-    { label: 'Deals', href: '/deals', icon: BriefcaseBusiness },
-    { label: 'Tasks', href: '/tasks', icon: ListTodo },
-    { label: 'Notes', href: '/notes', icon: NotebookPen },
-  ] },
-  { label: 'Connect', items: [
-    { label: 'Inbox', href: '/inbox', icon: Inbox },
-    { label: 'Community', href: '/community', icon: Compass },
-    { label: 'Support & Feedback', href: '/support', icon: HelpCircle },
-  ] },
+  {
+    label: 'Workspace', items: [
+      { label: 'Overview', href: '/dashboard', icon: LayoutDashboard },
+      { label: 'Contacts', href: '/contacts', icon: ContactRound },
+      { label: 'Companies', href: '/companies', icon: Building2 },
+      { label: 'Deals', href: '/deals', icon: BriefcaseBusiness },
+      { label: 'Tasks', href: '/tasks', icon: ListTodo },
+      { label: 'Notes', href: '/notes', icon: NotebookPen },
+    ]
+  },
+  {
+    label: 'Connect', items: [
+      { label: 'Inbox', href: '/inbox', icon: Inbox },
+      { label: 'Community', href: '/community', icon: Compass },
+      { label: 'Support & Feedback', href: '/support', icon: HelpCircle },
+    ]
+  },
   { label: 'Manage', items: [{ label: 'Team', href: '/team', icon: Users }] },
 ];
 const pageNames: Record<string, string> = Object.fromEntries(navGroups.flatMap(g => g.items.map(i => [i.href, i.label])));
@@ -566,8 +570,8 @@ function FieldInput({ field, value, set }: { field: Field; value: any; set: (val
   return <label className="block text-[12px] font-semibold text-[#52605d]">{field.label}{field.required && <span className="ml-1 text-[#bc5c4e]">*</span>}
     {field.options ? <select required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} className={base}><option value="">Select {field.label.toLowerCase()}</option>{field.options.map(v => <option key={v} value={v}>{v}</option>)}</select> :
       field.type === 'textarea' ? <textarea required={field.required} value={value ?? ''} onChange={e => set(e.target.value)} rows={3} className={`${base} resize-y`} placeholder={field.placeholder ?? `Add ${field.label.toLowerCase()}`} /> :
-      field.type === 'date' ? <input required={field.required} type="date" value={value ? String(value).slice(0, 10) : ''} onChange={e => set(e.target.value)} className={base} /> :
-      <input required={field.required} type={field.type ?? 'text'} min={field.type === 'number' ? 0 : undefined} max={field.key === 'probability' ? 100 : undefined} value={value ?? ''} onChange={e => set(field.type === 'number' ? e.target.value : e.target.value)} className={base} placeholder={field.placeholder ?? `Enter ${field.label.toLowerCase()}`} />}
+        field.type === 'date' ? <input required={field.required} type="date" value={value ? String(value).slice(0, 10) : ''} onChange={e => set(e.target.value)} className={base} /> :
+          <input required={field.required} type={field.type ?? 'text'} min={field.type === 'number' ? 0 : undefined} max={field.key === 'probability' ? 100 : undefined} value={value ?? ''} onChange={e => set(field.type === 'number' ? e.target.value : e.target.value)} className={base} placeholder={field.placeholder ?? `Enter ${field.label.toLowerCase()}`} />}
   </label>;
 }
 function RecordDialog({ entity, initial, onClose, onSave, busy }: { entity: string; initial?: AnyRecord; onClose: () => void; onSave: (data: AnyRecord) => void; busy: boolean }) {
@@ -898,7 +902,8 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
       <div className="border-t border-white/10 p-3"><button data-testid="button-account-menu" disabled={loggingOut} onClick={handleSignOut} className="flex w-full items-center gap-2.5 rounded-lg px-2 py-2 text-left transition hover:bg-white/[.06] disabled:opacity-60"><Avatar name={name} size="sm" /><span className="min-w-0 flex-1"><span className="block truncate text-[11px] font-semibold text-white">{name}</span><span className="block truncate text-[10px] capitalize text-[#9eb0a5]">{loggingOut ? 'Signing out…' : `${member?.role || 'Member'} · Sign out`}</span></span><LogOut size={14} className={`text-[#aabbb0] ${loggingOut ? 'animate-spin' : ''}`} /></button></div>
     </aside>
     <div className="min-h-[100dvh] md:pl-[236px]">
-      <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>{isSuperAdmin ? 'Super Admin' : 'Workspace'}</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{path === '/super-admin' ? 'Workspaces & Access' : (pageNames[path] || (isSuperAdmin ? 'Super Admin' : 'Dashboard'))}</span></div>{!isSuperAdmin && <div className="relative hidden lg:block"><Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#919d97]" /><input ref={searchInputRef} aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div>}</div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> {isSuperAdmin ? 'Super Admin Active' : 'Synced'}</span>{!isSuperAdmin && <div className="relative"><button aria-label="Notifications" data-testid="status-notifications" onClick={() => setNotificationsOpen(v => !v)} className="relative rounded-lg p-2 text-[#76837e] transition hover:bg-[#edf2ef] hover:text-[#28785b]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#38855e]" /></button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e1e8e4] bg-white p-3 shadow-xl"><div className="mb-2 flex items-center justify-between border-b border-[#edf0ee] pb-2"><span className="text-[12px] font-bold text-[#32423c]">Notifications</span><span className="text-[10px] text-[#71817b]">Workspace live</span></div><div className="space-y-2 text-[11px]"><div className="rounded-lg bg-[#f6f9f7] p-2 text-[#465650]"><p className="font-semibold text-[#28785b]">Active Workspace Sync</p><p className="text-[10px] text-[#7b8984]">All contacts, deals, and tasks are synchronized.</p></div><Link href="/tasks" onClick={() => setNotificationsOpen(false)} className="block rounded-lg p-2 hover:bg-[#f3f7f5] text-[#34443e]"><p className="font-semibold">Review your follow-ups</p><p className="text-[10px] text-[#818f8a]">Check today’s task queue to maintain momentum.</p></Link></div></div>}</div>}<span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
+      <div className="sticky top-0 z-20 flex h-[58px] items-center justify-between border-b border-[#e3e9e5] bg-[#f9fbfa]/95 px-4 backdrop-blur md:px-7"><div className="flex items-center gap-3"><button aria-label="Open navigation" data-testid="button-open-navigation" onClick={() => setMobileOpen(true)} className="rounded-lg p-2 text-[#667671] hover:bg-[#edf2ef] md:hidden"><Menu size={18} /></button><div className="hidden items-center gap-2 text-[11px] text-[#89948f] sm:flex"><span>{isSuperAdmin ? 'Super Admin' : 'Workspace'}</span><ChevronRight size={13} /><span className="font-semibold text-[#46554f]">{path === '/super-admin' ? 'Workspaces & Access' : (pageNames[path] || (isSuperAdmin ? 'Super Admin' : 'Dashboard'))}</span></div>{!isSuperAdmin && <div className="relative hidden lg:block">
+        <input ref={searchInputRef} aria-label="Jump to a page" data-testid="input-global-search" placeholder="Jump to a page…" onKeyDown={e => { if (e.key === 'Enter') { const query = e.currentTarget.value.toLowerCase(); const target = effectiveNavGroups.flatMap(g => g.items).find(item => item.label.toLowerCase().includes(query)); if (target) setLocation(target.href); } }} className="ml-6 w-[215px] rounded-lg border border-[#e3e9e5] bg-white py-1.5 pl-8 pr-12 text-[11px] outline-none placeholder:text-[#9ba6a1] focus:border-[#a3c9b2]" /><kbd className="absolute right-2 top-1/2 -translate-y-1/2 rounded border border-[#e8ece9] px-1 text-[9px] text-[#9aa49f]">⌘ K</kbd></div>}</div><div className="flex items-center gap-3"><span className="hidden items-center gap-1.5 rounded-full bg-[#eaf4ed] px-2.5 py-1 text-[10px] font-semibold text-[#347553] sm:inline-flex"><span className="h-1.5 w-1.5 rounded-full bg-[#69a981]" /> {isSuperAdmin ? 'Super Admin Active' : 'Synced'}</span>{!isSuperAdmin && <div className="relative"><button aria-label="Notifications" data-testid="status-notifications" onClick={() => setNotificationsOpen(v => !v)} className="relative rounded-lg p-2 text-[#76837e] transition hover:bg-[#edf2ef] hover:text-[#28785b]"><Bell size={17} /><span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#38855e]" /></button>{notificationsOpen && <div className="absolute right-0 top-12 z-50 w-72 rounded-xl border border-[#e1e8e4] bg-white p-3 shadow-xl"><div className="mb-2 flex items-center justify-between border-b border-[#edf0ee] pb-2"><span className="text-[12px] font-bold text-[#32423c]">Notifications</span><span className="text-[10px] text-[#71817b]">Workspace live</span></div><div className="space-y-2 text-[11px]"><div className="rounded-lg bg-[#f6f9f7] p-2 text-[#465650]"><p className="font-semibold text-[#28785b]">Active Workspace Sync</p><p className="text-[10px] text-[#7b8984]">All contacts, deals, and tasks are synchronized.</p></div><Link href="/tasks" onClick={() => setNotificationsOpen(false)} className="block rounded-lg p-2 hover:bg-[#f3f7f5] text-[#34443e]"><p className="font-semibold">Review your follow-ups</p><p className="text-[10px] text-[#818f8a]">Check today’s task queue to maintain momentum.</p></Link></div></div>}</div>}<span className="hidden h-6 w-px bg-[#e1e7e3] sm:block" /><Avatar name={name} size="sm" /></div></div>
       <main className="mx-auto max-w-[1480px] px-4 py-6 md:px-7 md:py-7">{children}</main>
     </div>
   </div>;
@@ -1312,10 +1317,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                 entity === 'contacts'
                   ? ['Name', 'Company', 'Relationship', 'Owner', 'Added', '']
                   : entity === 'companies'
-                  ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', '']
-                  : entity === 'deals'
-                  ? ['Opportunity', 'Company', 'Stage', 'Win probability', 'Close date', 'Owner', '']
-                  : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']
+                    ? ['Company', 'Industry', 'Team size', 'Status', 'Owner', '']
+                    : entity === 'deals'
+                      ? ['Opportunity', 'Company', 'Stage', 'Win probability', 'Close date', 'Owner', '']
+                      : ['Follow-up', 'Type', 'Due date', 'Priority', 'Status', 'Owner', '']
               }
             >
               {filtered.map(r => (
@@ -1818,29 +1823,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
             )}
           </Card>
         </div>
-
-        {/* Activity Feed */}
-        <Card className="mt-4">
-          <CardTitle title="Recent Workspace Activity" detail="The latest movements from your team across deals, tasks, and contacts" right={<ActivityIcon size={15} className="text-[#87938e]" />} />
-          {activity.isLoading ? (
-            <LoadingRows />
-          ) : a.length ? (
-            <div className="divide-y divide-[#f0f2f1]">
-              {a.slice(0, 6).map(item => (
-                <div key={item.id} data-testid={`activity-${item.id}`} className="flex items-center gap-3 px-5 py-3.5">
-                  <Avatar name={item.kind || item.title} size="sm" />
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate text-[12px] font-semibold text-[#3a4843]">{item.title}</p>
-                    <p className="mt-0.5 truncate text-[10px] text-[#87928e]">{item.detail}</p>
-                  </div>
-                  <span className="whitespace-nowrap text-[10px] text-[#98a29e]">{dateLabel(item.createdAt)}</span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <Empty title="A fresh start" detail="Team updates, new records, and deal movement will show here." />
-          )}
-        </Card>
       </>
     );
   }
@@ -2899,8 +2881,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           text: editingNote
             ? 'Note updated successfully.'
             : form.isShared
-            ? 'Note created and shared with your workspace team!'
-            : 'Private note saved to your personal scratchpad.',
+              ? 'Note created and shared with your workspace team!'
+              : 'Private note saved to your personal scratchpad.',
         });
       } catch (err: any) {
         setNotice({ tone: 'bad', text: err.message || 'Could not save note.' });
@@ -3082,11 +3064,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                 key={tab.id}
                 type="button"
                 onClick={() => setNoteFilter(tab.id as any)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
-                  noteFilter === tab.id
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${noteFilter === tab.id
                     ? 'bg-[#28785b] text-white shadow-sm'
                     : 'bg-[#f4f7f5] text-[#556560] hover:bg-[#e9eee9]'
-                }`}
+                  }`}
               >
                 <span>{tab.label}</span>
                 <span className={`rounded-full px-1.5 py-0.2 text-[10px] ${noteFilter === tab.id ? 'bg-white/25 text-white' : 'bg-black/5 text-[#6a7974]'}`}>
@@ -3122,11 +3103,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                 key={cat}
                 type="button"
                 onClick={() => setNoteCategory(val)}
-                className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition ${
-                  active
+                className={`shrink-0 rounded-full border px-3 py-1 text-[11px] font-medium transition ${active
                     ? 'border-[#28785b] bg-[#edf6f1] text-[#22634b]'
                     : 'border-[#dfe6e2] bg-white text-[#657570] hover:border-[#b8ccc2]'
-                }`}
+                  }`}
               >
                 {cat}
               </button>
@@ -3187,11 +3167,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                             onClick={() => handleTogglePin(note)}
                             disabled={togglingPinId === note.id}
                             title={note.isPinned ? 'Unpin from top' : 'Pin to top'}
-                            className={`rounded-md p-1 transition ${
-                              note.isPinned
+                            className={`rounded-md p-1 transition ${note.isPinned
                                 ? 'text-amber-600 hover:bg-amber-100'
                                 : 'text-[#8b9993] hover:bg-black/5 hover:text-[#2d3d37]'
-                            }`}
+                              }`}
                           >
                             <Pin size={13} className={note.isPinned ? 'fill-amber-500' : ''} />
                           </button>
@@ -3262,11 +3241,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                             onClick={() => handleToggleShare(note)}
                             disabled={togglingShareId === note.id}
                             title={note.isShared ? 'Make note private (only you)' : 'Share note with your workspace team'}
-                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${
-                              note.isShared
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition ${note.isShared
                                 ? 'bg-[#e2f1e8] text-[#226645] hover:bg-[#d4e9dc]'
                                 : 'bg-black/5 text-[#556560] hover:bg-black/10 hover:text-[#22322d]'
-                            }`}
+                              }`}
                           >
                             <Share2 size={12} />
                             <span>{note.isShared ? 'Shared' : 'Share'}</span>
@@ -3360,9 +3338,8 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                         type="button"
                         onClick={() => setForm(f => ({ ...f, color: c.id }))}
                         title={c.label}
-                        className={`h-6 w-6 rounded-full transition ${c.bg} ${
-                          form.color === c.id ? 'ring-2 ring-black ring-offset-2' : 'opacity-70 hover:opacity-100'
-                        }`}
+                        className={`h-6 w-6 rounded-full transition ${c.bg} ${form.color === c.id ? 'ring-2 ring-black ring-offset-2' : 'opacity-70 hover:opacity-100'
+                          }`}
                       />
                     ))}
                   </div>
@@ -3675,11 +3652,10 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                 key={tab.id}
                 type="button"
                 onClick={() => setSupportFilter(tab.id)}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${
-                  supportFilter === tab.id
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-[12px] font-semibold transition ${supportFilter === tab.id
                     ? 'bg-[#28785b] text-white shadow-sm'
                     : 'bg-[#f4f7f5] text-[#556560] hover:bg-[#e9eee9]'
-                }`}
+                  }`}
               >
                 <span>{tab.label}</span>
                 {tab.count !== undefined && (
