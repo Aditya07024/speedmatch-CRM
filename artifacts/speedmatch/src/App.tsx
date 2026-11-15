@@ -1528,49 +1528,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
         />
         {notices}
 
-        {/* Quick Action Ribbon */}
-        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-[#e2e8e4] bg-white p-2.5 shadow-sm">
-          <span className="px-2 text-[10px] font-bold uppercase tracking-wider text-[#798882]">Quick Actions:</span>
-          <button
-            type="button"
-            onClick={() => setModal({ entity: 'deals' })}
-            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
-          >
-            <Plus size={13} className="text-[#28785b]" /> Deal
-          </button>
-          <button
-            type="button"
-            onClick={() => setModal({ entity: 'contacts' })}
-            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
-          >
-            <ContactRound size={13} className="text-[#3b7e5b]" /> Contact
-          </button>
-          <button
-            type="button"
-            onClick={() => setModal({ entity: 'tasks' })}
-            className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
-          >
-            <CalendarDays size={13} className="text-[#967b36]" /> Follow-up
-          </button>
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={() => setModal({ entity: 'companies' })}
-              className="flex items-center gap-1.5 rounded-lg border border-[#dde5e0] bg-[#fbfcfb] px-3 py-1.5 text-[11px] font-semibold text-[#32433d] transition hover:bg-[#edf5f0] hover:text-[#28785b] hover:border-[#a5cbb5]"
-            >
-              <Building2 size={13} className="text-[#4b6a82]" /> Company
-            </button>
-          )}
-          <div className="ml-auto hidden sm:flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => { setDealView('kanban'); setLocation('/deals'); }}
-              className="flex items-center gap-1.5 rounded-lg bg-[#28785b]/10 px-3 py-1.5 text-[11px] font-bold text-[#28785b] transition hover:bg-[#28785b]/20"
-            >
-              <Kanban size={13} /> Pipeline Board →
-            </button>
-          </div>
-        </div>
 
         {dash.isLoading ? (
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
@@ -1823,6 +1780,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
             )}
           </Card>
         </div>
+
       </>
     );
   }
