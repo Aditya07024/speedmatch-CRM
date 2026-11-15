@@ -236,3 +236,24 @@ export const supportTicketsTable = pgTable("speedmatch_support_tickets", {
     .defaultNow(),
 });
 
+export const companyCalendarEventsTable = pgTable("speedmatch_calendar_events", {
+  id: serial("id").primaryKey(),
+  companyId: integer("company_id"),
+  title: text("title").notNull(),
+  startDate: text("start_date").notNull(),
+  endDate: text("end_date"),
+  type: text("type").notNull().default("Holiday"),
+  isHoliday: integer("is_holiday").notNull().default(1),
+  description: text("description").notNull().default(""),
+  location: text("location").notNull().default(""),
+  uploadedBy: text("uploaded_by").notNull().default(""),
+  sourceFileName: text("source_file_name"),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
+

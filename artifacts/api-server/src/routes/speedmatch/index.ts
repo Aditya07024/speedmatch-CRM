@@ -1,5 +1,6 @@
 import { Router, type IRouter } from "express";
 import { requireActiveMember } from "../../lib/speedmatch-auth";
+import calendarRouter from "./calendar";
 import communicationsRouter from "./communications";
 import crmRouter from "./crm";
 import dashboardRouter from "./dashboard";
@@ -18,5 +19,6 @@ router.use(crmRouter);
 router.use(communicationsRouter);
 router.use(notesRouter);
 router.use(supportRouter);
+router.use(calendarRouter);
 
 export default router;

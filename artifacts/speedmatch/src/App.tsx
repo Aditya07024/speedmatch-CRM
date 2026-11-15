@@ -9,7 +9,8 @@ import {
   Send, Sparkles, Target, TrendingUp, UserPlus, Users, X, ListTodo,
   Pencil, Trash2, RotateCw, ArrowRight, ShieldCheck, Mail, LockKeyhole, Menu, Globe2, MessageSquareText,
   ShieldAlert, KeyRound, AlertCircle, UserCheck, Download, Kanban, List, Trophy, Layers,
-  Phone, Video, FileSpreadsheet, NotebookPen, StickyNote, Pin, Share2, Copy, HelpCircle, LifeBuoy, MessageSquareHeart, Tag
+  Phone, Video, FileSpreadsheet, NotebookPen, StickyNote, Pin, Share2, Copy, HelpCircle, LifeBuoy, MessageSquareHeart, Tag,
+  Calendar, Upload, MapPin, PartyPopper, CalendarRange
 } from 'lucide-react';
 import {
   useGetDashboardSummary, getGetDashboardSummaryQueryKey, useGetDashboardActivity, getGetDashboardActivityQueryKey,
@@ -453,6 +454,7 @@ const navGroups = [
       { label: 'Deals', href: '/deals', icon: BriefcaseBusiness },
       { label: 'Tasks', href: '/tasks', icon: ListTodo },
       { label: 'Notes', href: '/notes', icon: NotebookPen },
+      { label: 'Calendar', href: '/calendar', icon: Calendar },
     ]
   },
   {
@@ -862,6 +864,7 @@ function AppShell({ path, member, children }: { path: string; member: AnyRecord;
         { label: 'Companies', href: '/companies', icon: Building2 },
         { label: 'Tasks', href: '/tasks', icon: ListTodo },
         { label: 'Notes', href: '/notes', icon: NotebookPen },
+        { label: 'Calendar', href: '/calendar', icon: Calendar },
         { label: 'Community', href: '/community', icon: Compass },
         { label: 'Support & Reports', href: '/support', icon: HelpCircle },
       ],
@@ -915,6 +918,22 @@ function Metric({ label, value, note, icon: Icon, onClick }: { label: string; va
 }
 function currency(value: any) { return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(Number(value) || 0); }
 function dateLabel(value: any) { if (!value) return '—'; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).format(date); }
+function getDaysUntil(dateStr: string): { label: string; tone: 'green' | 'amber' | 'blue' | 'neutral' | 'red'; diffDays: number } {
+  if (!dateStr) return { label: '—', tone: 'neutral', diffDays: 999 };
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const target = new Date(dateStr.slice(0, 10) + 'T00:00:00');
+  target.setHours(0, 0, 0, 0);
+  const diffTime = target.getTime() - today.getTime();
+  const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+  if (diffDays === 0) return { label: 'Today', tone: 'green', diffDays };
+  if (diffDays === 1) return { label: 'Tomorrow', tone: 'amber', diffDays };
+  if (diffDays > 1 && diffDays <= 7) return { label: `In ${diffDays} days`, tone: 'blue', diffDays };
+  if (diffDays > 7 && diffDays <= 30) return { label: `In ${Math.ceil(diffDays / 7)} weeks`, tone: 'neutral', diffDays };
+  if (diffDays > 30) return { label: `In ${Math.round(diffDays / 30)} mo`, tone: 'neutral', diffDays };
+  return { label: `${Math.abs(diffDays)}d ago`, tone: 'neutral', diffDays };
+}
 function ToneStatus({ value }: { value: any }) {
   const v = String(value || '—');
   const tone = /won|customer|approved|complete|active/i.test(v) ? 'green' : /negotiation|pending|progress|qualified|proposal/i.test(v) ? 'amber' : /lost|rejected|overdue|inactive/i.test(v) ? 'red' : /lead|discovery/i.test(v) ? 'blue' : 'neutral';
@@ -951,6 +970,55 @@ function PostCommentInput({ postId, onComment, isPending }: { postId: number; on
   );
 }
 
+function SendMessageForm({
+  activeConversation,
+  onSendMessage,
+  isPending,
+}: {
+  activeConversation: number;
+  onSendMessage: (id: number, text: string) => void;
+  isPending: boolean;
+}) {
+  const [text, setText] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  return (
+    <form
+      className="flex items-end gap-2 border-t border-[#edf0ee] bg-white p-3"
+      onSubmit={e => {
+        e.preventDefault();
+        const trimmed = text.trim();
+        if (!trimmed || !activeConversation) return;
+        onSendMessage(activeConversation, trimmed);
+        setText('');
+      }}
+    >
+      <textarea
+        ref={textareaRef}
+        data-testid="input-message-body"
+        value={text}
+        onChange={e => setText(e.target.value)}
+        onKeyDown={e => {
+          if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            const trimmed = text.trim();
+            if (trimmed && !isPending && activeConversation) {
+              onSendMessage(activeConversation, trimmed);
+              setText('');
+            }
+          }
+        }}
+        rows={1}
+        placeholder="Write a message… (Press Enter to send, Shift+Enter for new line)"
+        className="max-h-28 min-h-10 flex-1 resize-y rounded-lg border border-[#e2e9e5] bg-[#fafbfa] px-3 py-2.5 text-[12px] outline-none focus:border-[#9fc5ac]"
+      />
+      <Btn type="submit" disabled={!text.trim() || isPending} className="h-10 w-10 px-0" title="Send message (Enter)">
+        <Send size={15} />
+      </Btn>
+    </form>
+  );
+}
+
 function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [, setLocation] = useLocation();
   const qc = useQueryClient();
@@ -959,7 +1027,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
   const [filteredOnly, setFilteredOnly] = useState(false);
   const [modal, setModal] = useState<{ entity: string; row?: AnyRecord } | null>(null);
   const [activeConversation, setActiveConversation] = useState<number | null>(null);
-  const [messageBody, setMessageBody] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<'member' | 'admin'>('member');
   const [postOpen, setPostOpen] = useState(false);
@@ -1475,6 +1542,20 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     const overdueTasks = remainingTasks.filter(t => t.dueDate && t.dueDate < todayStr);
     const topTasks = [...remainingTasks, ...completedTasks].slice(0, 6);
 
+    const dashCalQuery = useQuery<{ events: AnyRecord[] }>({
+      queryKey: ['speedmatch-calendar-dash'],
+      queryFn: async () => {
+        const res = await fetch('/api/calendar/events', { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load events');
+        return res.json();
+      },
+      refetchInterval: 30_000,
+    });
+    const calList: AnyRecord[] = dashCalQuery.data?.events || [];
+    const upcomingCalEvents = calList
+      .filter(e => (e.startDate && e.startDate >= todayStr) || (e.endDate && e.endDate >= todayStr))
+      .slice(0, 3);
+
     const taskCompletionRate = allTasksList.length ? Math.round((completedTasks.length / allTasksList.length) * 100) : 100;
     const slaHealthPct = remainingTasks.length
       ? Math.max(0, Math.round(((remainingTasks.length - overdueTasks.length) / remainingTasks.length) * 100))
@@ -1781,6 +1862,75 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
           </Card>
         </div>
 
+        {/* Company Holidays & Events Card */}
+        <Card className="mt-4">
+          <CardTitle
+            title="Upcoming Company Holidays & Scheduled Events"
+            detail="Shared workspace schedule, official holidays, and team milestones"
+            right={
+              <Link href="/calendar" className="flex items-center gap-1 text-[11px] font-bold text-[#28785b] hover:underline">
+                View Calendar <ArrowRight size={12} />
+              </Link>
+            }
+          />
+          {dashCalQuery.isLoading ? (
+            <LoadingRows />
+          ) : upcomingCalEvents.length ? (
+            <div className="grid gap-3 p-5 sm:grid-cols-2 lg:grid-cols-3">
+              {upcomingCalEvents.map(ev => {
+                const countdown = getDaysUntil(ev.startDate);
+                return (
+                  <div key={ev.id} className="flex flex-col justify-between rounded-xl border border-[#e5ece8] bg-[#fbfcfb] p-4 hover:border-[#a5ceb7] transition">
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[10px] font-bold ${ev.isHoliday ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'}`}>
+                          {ev.isHoliday ? <PartyPopper size={11} /> : <Calendar size={11} />}
+                          {ev.type || (ev.isHoliday ? 'Holiday' : 'Event')}
+                        </span>
+                        <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${countdown.tone === 'green' ? 'bg-emerald-100 text-emerald-800' : countdown.tone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-[#eef2f0] text-[#556961]'}`}>
+                          {countdown.label}
+                        </span>
+                      </div>
+                      <h4 className="mt-2 text-[13px] font-bold text-[#32423c] line-clamp-1" title={ev.title}>{ev.title}</h4>
+                      {ev.description && <p className="mt-1 text-[11px] text-[#788882] line-clamp-2">{ev.description}</p>}
+                    </div>
+                    <div className="mt-3 flex items-center justify-between border-t border-[#f0f3f1] pt-2 text-[10px] text-[#84928d]">
+                      <span className="flex items-center gap-1">
+                        <CalendarDays size={12} className="text-[#84928d]" />
+                        {dateLabel(ev.startDate)}
+                        {ev.endDate && ev.endDate !== ev.startDate ? ` – ${dateLabel(ev.endDate)}` : ''}
+                      </span>
+                      {ev.location && (
+                        <span className="flex items-center gap-1 truncate max-w-[120px]">
+                          <MapPin size={11} className="shrink-0 text-[#84928d]" />
+                          <span className="truncate">{ev.location}</span>
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="p-6 text-center">
+              <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-xl bg-[#edf4f0] text-[#347b56]">
+                <Calendar size={18} />
+              </div>
+              <p className="text-[12px] font-bold text-[#35443e]">No upcoming holidays or events scheduled yet</p>
+              <p className="mt-1 text-[11px] text-[#84928d]">
+                {isAdmin
+                  ? "Upload a company calendar file (.ics / CSV) or load official holidays so all employees can see upcoming events."
+                  : "Check back later when your workspace administrator attaches the company calendar."}
+              </p>
+              {isAdmin && (
+                <div className="mt-3 flex justify-center gap-2">
+                  <Btn onClick={() => setLocation('/calendar')}><Upload size={13} /> Manage Company Calendar</Btn>
+                </div>
+              )}
+            </div>
+          )}
+        </Card>
+
       </>
     );
   }
@@ -2036,37 +2186,23 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                     <Empty title="Start with a hello" detail="Send a message to start this conversation." />
                   )}
                 </div>
-                <form
-                  className="flex items-end gap-2 border-t border-[#edf0ee] bg-white p-3"
-                  onSubmit={e => {
-                    e.preventDefault();
-                    if (!messageBody.trim() || !activeConversation) return;
+                <SendMessageForm
+                  activeConversation={activeConversation}
+                  isPending={createMessage.isPending}
+                  onSendMessage={(convId, body) => {
                     createMessage.mutate(
-                      { id: activeConversation, data: { body: messageBody.trim() } },
+                      { id: convId, data: { body } },
                       {
                         onSuccess: () => {
-                          qc.invalidateQueries({ queryKey: getListMessagesQueryKey(activeConversation) });
+                          qc.invalidateQueries({ queryKey: getListMessagesQueryKey(convId) });
                           qc.invalidateQueries({ queryKey: getListConversationsQueryKey() });
-                          setMessageBody('');
                           setNotice({ tone: 'good', text: 'Message sent.' });
                         },
                         onError: () => setNotice({ tone: 'bad', text: 'Message could not be sent. Try again.' }),
                       }
                     );
                   }}
-                >
-                  <textarea
-                    data-testid="input-message-body"
-                    value={messageBody}
-                    onChange={e => setMessageBody(e.target.value)}
-                    rows={1}
-                    placeholder="Write a message…"
-                    className="max-h-28 min-h-10 flex-1 resize-y rounded-lg border border-[#e2e9e5] bg-[#fafbfa] px-3 py-2.5 text-[12px] outline-none focus:border-[#9fc5ac]"
-                  />
-                  <Btn type="submit" disabled={!messageBody.trim() || createMessage.isPending} className="h-10 w-10 px-0">
-                    <Send size={15} />
-                  </Btn>
-                </form>
+                />
               </>
             ) : (
               <div className="flex flex-1 flex-col items-center justify-center px-8 text-center">
@@ -3365,6 +3501,1100 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     );
   }
 
+  function CalendarPage() {
+    const isSuperAdmin = member?.role === 'super_admin';
+    const [calSearch, setCalSearch] = useState('');
+    const [calFilter, setCalFilter] = useState<'all' | 'holidays' | 'events'>('all');
+    const [viewMode, setViewMode] = useState<'month' | 'list'>('month');
+    const [currentMonth, setCurrentMonth] = useState(() => new Date());
+
+    const [uploadModalOpen, setUploadModalOpen] = useState(false);
+    const [uploadFile, setUploadFile] = useState<File | null>(null);
+    const [uploadContent, setUploadContent] = useState('');
+    const [uploadFileName, setUploadFileName] = useState('');
+    const [uploadReplace, setUploadReplace] = useState(false);
+    const [uploadPreview, setUploadPreview] = useState<Array<{ title: string; startDate: string; endDate?: string; type: string; isHoliday: number; location?: string }> | null>(null);
+    const [uploading, setUploading] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
+
+    const [addEventModalOpen, setAddEventModalOpen] = useState(false);
+    const [editingEvent, setEditingEvent] = useState<AnyRecord | null>(null);
+    const [savingEvent, setSavingEvent] = useState(false);
+    const [selectedEventDetails, setSelectedEventDetails] = useState<AnyRecord | null>(null);
+
+    const [eventForm, setEventForm] = useState({
+      title: '',
+      startDate: new Date().toISOString().slice(0, 10),
+      endDate: '',
+      type: 'Holiday',
+      isHoliday: true,
+      description: '',
+      location: '',
+    });
+
+    const { data: calData, isLoading: loadingCal, refetch } = useQuery<{ events: AnyRecord[]; total: number }>({
+      queryKey: ['speedmatch-calendar', calSearch, calFilter],
+      queryFn: async () => {
+        const params = new URLSearchParams();
+        if (calSearch) params.set('search', calSearch);
+        if (calFilter === 'holidays') params.set('holidaysOnly', 'true');
+        else if (calFilter === 'events') params.set('type', 'event');
+        const res = await fetch(`/api/calendar/events?${params.toString()}`, { credentials: 'include' });
+        if (!res.ok) throw new Error('Failed to load company calendar');
+        return res.json();
+      },
+      refetchInterval: 30_000,
+    });
+
+    const eventsList: AnyRecord[] = calData?.events || [];
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    // Filtered by active tab
+    const displayEvents = eventsList.filter(ev => {
+      if (calFilter === 'holidays') return Boolean(ev.isHoliday);
+      if (calFilter === 'events') return !ev.isHoliday;
+      return true;
+    });
+
+    // Upcoming events for metrics and timeline
+    const upcomingEvents = [...displayEvents]
+      .filter(ev => (ev.startDate && ev.startDate >= todayStr) || (ev.endDate && ev.endDate >= todayStr))
+      .sort((a, b) => (a.startDate || '').localeCompare(b.startDate || ''));
+
+    const upcomingHolidays = upcomingEvents.filter(ev => Boolean(ev.isHoliday));
+    const upcomingCompanyEvents = upcomingEvents.filter(ev => !ev.isHoliday);
+    const nextHoliday = upcomingHolidays[0];
+
+    // Export calendar
+    const handleExportCalendar = () => {
+      exportToCsv(eventsList, 'company-calendar');
+    };
+
+    // Client-side quick preview of calendar file
+    const processFileContent = (content: string, name: string) => {
+      setUploadContent(content);
+      setUploadFileName(name);
+      const parsed: Array<{ title: string; startDate: string; endDate?: string; type: string; isHoliday: number; location?: string }> = [];
+
+      try {
+        if (content.includes('BEGIN:VEVENT')) {
+          const unfolded = content.replace(/\r?\n[ \t]/g, '');
+          const blocks = unfolded.split('BEGIN:VEVENT').slice(1);
+          for (const block of blocks) {
+            const lines = block.split(/\r?\n/);
+            let title = '';
+            let startDate = '';
+            let endDate = '';
+            let location = '';
+            for (const line of lines) {
+              if (line.startsWith('END:VEVENT')) break;
+              const colon = line.indexOf(':');
+              if (colon === -1) continue;
+              const key = line.slice(0, colon).split(';')[0].toUpperCase();
+              const val = line.slice(colon + 1).replace(/\\,/g, ',').replace(/\\;/g, ';').trim();
+              if (key === 'SUMMARY') title = val;
+              else if (key === 'DTSTART') startDate = val.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+              else if (key === 'DTEND') endDate = val.slice(0, 8).replace(/^(\d{4})(\d{2})(\d{2})/, '$1-$2-$3');
+              else if (key === 'LOCATION') location = val;
+            }
+            if (title && startDate) {
+              const isHoli = /holiday|day off|closure|leave|break|christmas|thanksgiving|new year|diwali|eid|memorial|labor|independence|easter/i.test(title);
+              parsed.push({
+                title,
+                startDate,
+                endDate: endDate || startDate,
+                type: isHoli ? 'Holiday' : 'Company Event',
+                isHoliday: isHoli ? 1 : 0,
+                location,
+              });
+            }
+          }
+        } else if (content.includes(',')) {
+          const lines = content.split(/\r?\n/).filter(l => l.trim().length > 0);
+          const startRow = /date|title|name/i.test(lines[0]) ? 1 : 0;
+          for (let i = startRow; i < lines.length; i++) {
+            const cols = lines[i].split(',').map(c => c.trim().replace(/^"|"$/g, ''));
+            if (cols.length >= 2 && cols[0] && cols[1]) {
+              const rawDate = cols[0].slice(0, 10);
+              const isHoli = /holiday|off|closure|leave|break/i.test(cols[2] || cols[1]);
+              parsed.push({
+                startDate: rawDate,
+                title: cols[1],
+                type: cols[2] || (isHoli ? 'Holiday' : 'Company Event'),
+                isHoliday: isHoli ? 1 : 0,
+                location: cols[3] || '',
+              });
+            }
+          }
+        }
+      } catch (err) {
+        console.warn('Preview parse warning:', err);
+      }
+      setUploadPreview(parsed.length ? parsed : null);
+    };
+
+    const handleFileSelected = (file: File) => {
+      setUploadFile(file);
+      const reader = new FileReader();
+      reader.onload = e => {
+        const text = String(e.target?.result || '');
+        processFileContent(text, file.name);
+      };
+      reader.readAsText(file);
+    };
+
+    // Submit upload to backend
+    const handleSubmitUpload = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!uploadContent) {
+        setNotice({ tone: 'bad', text: 'Please select a valid calendar file (.ics or .csv).' });
+        return;
+      }
+      setUploading(true);
+      try {
+        const res = await fetch('/api/calendar/upload', {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            fileContent: uploadContent,
+            fileName: uploadFileName || 'calendar.ics',
+            replaceExisting: uploadReplace,
+            save: true,
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setNotice({ tone: 'good', text: data.message || `Successfully attached ${data.savedCount} items to company calendar!` });
+          setUploadModalOpen(false);
+          setUploadFile(null);
+          setUploadContent('');
+          setUploadPreview(null);
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar'] });
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar-dash'] });
+          qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+        } else {
+          setNotice({ tone: 'bad', text: data.error || 'Could not parse and attach calendar.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to upload calendar file.' });
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    // 1-Click Seed Official Holidays
+    const handleSeedHolidays = async () => {
+      if (!window.confirm('Initialize company calendar with official 2026/2027 holidays and company milestones?')) return;
+      setUploading(true);
+      try {
+        const res = await fetch('/api/calendar/seed-holidays', {
+          method: 'POST',
+          credentials: 'include',
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setNotice({ tone: 'good', text: data.message || 'Official company holidays loaded!' });
+          setUploadModalOpen(false);
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar'] });
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar-dash'] });
+          qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+        } else {
+          setNotice({ tone: 'bad', text: data.error || 'Failed to load official holidays.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Could not connect to calendar service.' });
+      } finally {
+        setUploading(false);
+      }
+    };
+
+    // Save manual event
+    const handleSaveEvent = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!eventForm.title.trim() || !eventForm.startDate) {
+        setNotice({ tone: 'bad', text: 'Title and start date are required.' });
+        return;
+      }
+      setSavingEvent(true);
+      try {
+        const url = editingEvent ? `/api/calendar/events/${editingEvent.id}` : '/api/calendar/events';
+        const method = editingEvent ? 'PUT' : 'POST';
+        const res = await fetch(url, {
+          method,
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            title: eventForm.title.trim(),
+            startDate: eventForm.startDate,
+            endDate: eventForm.endDate || eventForm.startDate,
+            type: eventForm.type,
+            isHoliday: eventForm.isHoliday ? 1 : 0,
+            location: eventForm.location.trim(),
+            description: eventForm.description.trim(),
+          }),
+        });
+        const data = await res.json();
+        if (res.ok) {
+          setNotice({ tone: 'good', text: editingEvent ? 'Event updated successfully.' : 'New event attached to calendar.' });
+          setAddEventModalOpen(false);
+          setEditingEvent(null);
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar'] });
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar-dash'] });
+          qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
+        } else {
+          setNotice({ tone: 'bad', text: data.error || 'Could not save event.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to save calendar event.' });
+      } finally {
+        setSavingEvent(false);
+      }
+    };
+
+    // Delete event
+    const handleDeleteEvent = async (ev: AnyRecord) => {
+      if (!window.confirm(`Delete "${ev.title}" from company calendar?`)) return;
+      try {
+        const res = await fetch(`/api/calendar/events/${ev.id}`, {
+          method: 'DELETE',
+          credentials: 'include',
+        });
+        if (res.ok) {
+          setNotice({ tone: 'good', text: 'Event removed from company calendar.' });
+          setSelectedEventDetails(null);
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar'] });
+          qc.invalidateQueries({ queryKey: ['speedmatch-calendar-dash'] });
+        } else {
+          setNotice({ tone: 'bad', text: 'Could not delete event.' });
+        }
+      } catch {
+        setNotice({ tone: 'bad', text: 'Failed to delete event.' });
+      }
+    };
+
+    // Month navigation
+    const year = currentMonth.getFullYear();
+    const month = currentMonth.getMonth();
+    const monthLabel = currentMonth.toLocaleString('en-US', { month: 'long', year: 'numeric' });
+
+    const handlePrevMonth = () => setCurrentMonth(new Date(year, month - 1, 1));
+    const handleNextMonth = () => setCurrentMonth(new Date(year, month + 1, 1));
+    const handleTodayMonth = () => setCurrentMonth(new Date());
+
+    // Month grid generator
+    const firstDayIndex = new Date(year, month, 1).getDay(); // 0 = Sun
+    const daysInCurrentMonth = new Date(year, month + 1, 0).getDate();
+    const daysInPrevMonth = new Date(year, month, 0).getDate();
+
+    const calendarGridCells: Array<{ day: number; dateStr: string; isCurrentMonth: boolean; isToday: boolean; events: AnyRecord[] }> = [];
+
+    // Prev month padding
+    for (let i = firstDayIndex - 1; i >= 0; i--) {
+      const dayNum = daysInPrevMonth - i;
+      const prevDate = new Date(year, month - 1, dayNum);
+      const dateStr = prevDate.toISOString().slice(0, 10);
+      const cellEvents = eventsList.filter(e => (e.startDate <= dateStr && (e.endDate || e.startDate) >= dateStr) || e.startDate === dateStr);
+      calendarGridCells.push({
+        day: dayNum,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+        events: cellEvents,
+      });
+    }
+
+    // Current month days
+    for (let d = 1; d <= daysInCurrentMonth; d++) {
+      const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+      const cellEvents = eventsList.filter(e => (e.startDate <= dateStr && (e.endDate || e.startDate) >= dateStr) || e.startDate === dateStr);
+      calendarGridCells.push({
+        day: d,
+        dateStr,
+        isCurrentMonth: true,
+        isToday: dateStr === todayStr,
+        events: cellEvents,
+      });
+    }
+
+    // Next month padding to fill multiple of 7
+    const remaining = (7 - (calendarGridCells.length % 7)) % 7;
+    for (let d = 1; d <= remaining; d++) {
+      const nextDate = new Date(year, month + 1, d);
+      const dateStr = nextDate.toISOString().slice(0, 10);
+      const cellEvents = eventsList.filter(e => (e.startDate <= dateStr && (e.endDate || e.startDate) >= dateStr) || e.startDate === dateStr);
+      calendarGridCells.push({
+        day: d,
+        dateStr,
+        isCurrentMonth: false,
+        isToday: dateStr === todayStr,
+        events: cellEvents,
+      });
+    }
+
+    // Group upcoming events by month for timeline list
+    const groupedUpcoming: Record<string, AnyRecord[]> = {};
+    for (const ev of upcomingEvents) {
+      const monthKey = ev.startDate ? new Date(ev.startDate.slice(0, 10) + 'T00:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' }) : 'Undated';
+      if (!groupedUpcoming[monthKey]) groupedUpcoming[monthKey] = [];
+      groupedUpcoming[monthKey].push(ev);
+    }
+
+    return (
+      <div className="space-y-4">
+        <PageHeader
+          title="Company Calendar"
+          description="Company-wide holidays, scheduled events, all-hands, and key milestones in one shared view for all employees."
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              {isAdmin ? (
+                <>
+                  <Btn onClick={() => { setUploadFile(null); setUploadContent(''); setUploadFileName(''); setUploadPreview(null); setUploadModalOpen(true); }}>
+                    <Upload size={14} /> Upload Calendar (.ics / CSV)
+                  </Btn>
+                  <Btn kind="soft" onClick={() => {
+                    setEditingEvent(null);
+                    setEventForm({
+                      title: '',
+                      startDate: new Date().toISOString().slice(0, 10),
+                      endDate: '',
+                      type: 'Holiday',
+                      isHoliday: true,
+                      description: '',
+                      location: '',
+                    });
+                    setAddEventModalOpen(true);
+                  }}>
+                    <Plus size={14} /> Add Event
+                  </Btn>
+                  <Btn kind="outline" onClick={handleExportCalendar} title="Export calendar to CSV">
+                    <Download size={13} /> Export CSV
+                  </Btn>
+                </>
+              ) : (
+                <>
+                  <span className="flex items-center gap-1.5 rounded-lg border border-[#cbe4d4] bg-[#edf6f1] px-3 py-1.5 text-[11px] font-bold text-[#2a6d4e]">
+                    <CheckCircle2 size={13} /> Synced for All Employees
+                  </span>
+                  <Btn kind="outline" onClick={handleExportCalendar} title="Export calendar to CSV">
+                    <Download size={13} /> Export CSV
+                  </Btn>
+                </>
+              )}
+            </div>
+          }
+        />
+        {notices}
+
+        {/* Top Summary Cards */}
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Metric
+            label="Upcoming Holidays"
+            value={String(upcomingHolidays.length)}
+            note={`${eventsList.filter(e => e.isHoliday).length} total holidays attached`}
+            icon={PartyPopper}
+            onClick={() => setCalFilter('holidays')}
+          />
+          <Card className="p-4">
+            <div className="flex items-start justify-between">
+              <span className="text-[11px] font-semibold text-[#77847f]">Next Company Holiday</span>
+              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#edf5f0] text-[#43815f]">
+                <Calendar size={16} />
+              </span>
+            </div>
+            {nextHoliday ? (
+              <div className="mt-2">
+                <p className="truncate font-display text-[15px] font-bold text-[#293a34]" title={nextHoliday.title}>{nextHoliday.title}</p>
+                <div className="mt-1 flex items-center gap-2">
+                  <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-extrabold text-emerald-800">
+                    {getDaysUntil(nextHoliday.startDate).label}
+                  </span>
+                  <span className="text-[11px] text-[#83928c]">{dateLabel(nextHoliday.startDate)}</span>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-2">
+                <p className="text-[14px] font-bold text-[#556961]">None scheduled</p>
+                <p className="mt-1 text-[10px] text-[#939d99]">Admin can upload calendar</p>
+              </div>
+            )}
+          </Card>
+          <Metric
+            label="Company Events & Syncs"
+            value={String(upcomingCompanyEvents.length)}
+            note={`${eventsList.filter(e => !e.isHoliday).length} meetings & milestones`}
+            icon={Users}
+            onClick={() => setCalFilter('events')}
+          />
+          <Metric
+            label="Total Attached Schedule"
+            value={String(eventsList.length)}
+            note="Platform-wide calendar items"
+            icon={CalendarRange}
+            onClick={() => setCalFilter('all')}
+          />
+        </div>
+
+        {/* View & Filter Controls */}
+        <Card className="overflow-hidden">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[#edf0ee] bg-[#fafbfa] p-3">
+            <div className="flex items-center gap-2">
+              <div className="flex items-center rounded-lg border border-[#dce5e0] bg-white p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setViewMode('month')}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${viewMode === 'month' ? 'bg-[#28785b] text-white shadow-sm' : 'text-[#64746e] hover:text-[#28785b]'}`}
+                >
+                  <Calendar size={13} /> Month Grid
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setViewMode('list')}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-[11px] font-semibold transition ${viewMode === 'list' ? 'bg-[#28785b] text-white shadow-sm' : 'text-[#64746e] hover:text-[#28785b]'}`}
+                >
+                  <List size={13} /> Upcoming Schedule
+                </button>
+              </div>
+
+              <div className="hidden sm:flex items-center gap-1 rounded-lg border border-[#e1e7e3] bg-white p-0.5 text-[11px]">
+                <button
+                  type="button"
+                  onClick={() => setCalFilter('all')}
+                  className={`rounded-md px-2.5 py-1 font-semibold transition ${calFilter === 'all' ? 'bg-[#edf5f0] text-[#28785b]' : 'text-[#6a7b74] hover:text-[#28785b]'}`}
+                >
+                  All ({eventsList.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalFilter('holidays')}
+                  className={`rounded-md px-2.5 py-1 font-semibold transition ${calFilter === 'holidays' ? 'bg-[#edf5f0] text-[#28785b]' : 'text-[#6a7b74] hover:text-[#28785b]'}`}
+                >
+                  Holidays ({eventsList.filter(e => e.isHoliday).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCalFilter('events')}
+                  className={`rounded-md px-2.5 py-1 font-semibold transition ${calFilter === 'events' ? 'bg-[#edf5f0] text-[#28785b]' : 'text-[#6a7b74] hover:text-[#28785b]'}`}
+                >
+                  Events ({eventsList.filter(e => !e.isHoliday).length})
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative min-w-[200px] sm:w-64">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-[#97a29d]" />
+                <input
+                  data-testid="input-search-calendar"
+                  value={calSearch}
+                  onChange={e => setCalSearch(e.target.value)}
+                  placeholder="Search events, holidays, locations…"
+                  className="w-full rounded-lg border border-[#dce5e0] bg-white py-1.5 pl-8 pr-3 text-[11px] outline-none focus:border-[#9fc5ac]"
+                />
+              </div>
+
+              {isAdmin && eventsList.length === 0 && (
+                <Btn kind="soft" onClick={handleSeedHolidays} disabled={uploading}>
+                  <Sparkles size={13} /> 1-Click Load Official Holidays
+                </Btn>
+              )}
+            </div>
+          </div>
+
+          {loadingCal ? (
+            <div className="p-6">
+              <LoadingRows />
+            </div>
+          ) : viewMode === 'month' ? (
+            /* Month Grid View */
+            <div className="p-4 sm:p-5">
+              {/* Month Navigation */}
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="flex items-center gap-2">
+                  <h3 className="font-display text-[18px] font-bold text-[#2a3c35]">{monthLabel}</h3>
+                  <Badge tone="neutral">{eventsList.filter(e => e.startDate?.startsWith(`${year}-${String(month + 1).padStart(2, '0')}`)).length} items this month</Badge>
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={handlePrevMonth}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#dce5e0] bg-white text-[#4f605a] hover:bg-[#f2f7f4] transition"
+                    title="Previous month"
+                  >
+                    ←
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleTodayMonth}
+                    className="rounded-lg border border-[#dce5e0] bg-white px-2.5 py-1 text-[11px] font-bold text-[#32453e] hover:bg-[#f2f7f4] transition"
+                  >
+                    Today
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleNextMonth}
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-[#dce5e0] bg-white text-[#4f605a] hover:bg-[#f2f7f4] transition"
+                    title="Next month"
+                  >
+                    →
+                  </button>
+                </div>
+              </div>
+
+              {/* 7-day Column Headers */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-2 mb-1.5 text-center text-[10px] font-extrabold uppercase tracking-wider text-[#7e8f88]">
+                {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                  <div key={d} className="py-1">{d}</div>
+                ))}
+              </div>
+
+              {/* Calendar Grid */}
+              <div className="grid grid-cols-7 gap-1 sm:gap-2">
+                {calendarGridCells.map((cell, idx) => (
+                  <div
+                    key={idx}
+                    className={`min-h-[85px] sm:min-h-[105px] rounded-xl border p-1.5 sm:p-2 flex flex-col justify-between transition ${
+                      cell.isToday
+                        ? 'border-[#28785b] bg-[#f2f8f5] shadow-xs'
+                        : cell.isCurrentMonth
+                        ? 'border-[#e8eeea] bg-white hover:border-[#b5d3c2]'
+                        : 'border-[#f0f4f1] bg-[#fafbfa] text-[#a0ada6]'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className={`flex h-5 w-5 items-center justify-center rounded-full text-[11px] font-bold ${
+                        cell.isToday
+                          ? 'bg-[#28785b] text-white'
+                          : cell.isCurrentMonth
+                          ? 'text-[#384a44]'
+                          : 'text-[#9faaa4]'
+                      }`}>
+                        {cell.day}
+                      </span>
+                      {cell.events.length > 0 && (
+                        <span className="hidden sm:inline-block text-[9px] font-semibold text-[#7e8f88]">
+                          {cell.events.length} {cell.events.length === 1 ? 'item' : 'items'}
+                        </span>
+                      )}
+                    </div>
+
+                    <div className="mt-1 space-y-1 flex-1 overflow-hidden">
+                      {cell.events.slice(0, 2).map(ev => {
+                        const isHoli = Boolean(ev.isHoliday);
+                        return (
+                          <button
+                            key={ev.id}
+                            type="button"
+                            onClick={() => setSelectedEventDetails(ev)}
+                            className={`w-full truncate rounded px-1.5 py-0.5 text-left text-[9px] sm:text-[10px] font-bold transition flex items-center gap-1 ${
+                              isHoli
+                                ? 'bg-emerald-100 text-emerald-800 hover:bg-emerald-200'
+                                : ev.type === 'All Hands' || ev.type === 'Meeting'
+                                ? 'bg-purple-100 text-purple-800 hover:bg-purple-200'
+                                : ev.type === 'Milestone'
+                                ? 'bg-amber-100 text-amber-800 hover:bg-amber-200'
+                                : 'bg-blue-100 text-blue-800 hover:bg-blue-200'
+                            }`}
+                            title={`${ev.title} (${ev.type})`}
+                          >
+                            <span className="shrink-0 h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+                            <span className="truncate">{ev.title}</span>
+                          </button>
+                        );
+                      })}
+                      {cell.events.length > 2 && (
+                        <button
+                          type="button"
+                          onClick={() => setSelectedEventDetails(cell.events[0])}
+                          className="w-full text-left text-[9px] font-bold text-[#28785b] hover:underline"
+                        >
+                          +{cell.events.length - 2} more
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            /* Upcoming Schedule List View */
+            <div className="p-4 sm:p-5">
+              {Object.keys(groupedUpcoming).length ? (
+                <div className="space-y-6">
+                  {Object.entries(groupedUpcoming).map(([monthTitle, evs]) => (
+                    <div key={monthTitle}>
+                      <div className="mb-3 flex items-center gap-2">
+                        <span className="h-2 w-2 rounded-full bg-[#28785b]" />
+                        <h4 className="font-display text-[14px] font-bold text-[#2a3c35]">{monthTitle}</h4>
+                        <span className="text-[11px] font-semibold text-[#80918b]">({evs.length})</span>
+                      </div>
+
+                      <div className="space-y-2.5">
+                        {evs.map(ev => {
+                          const countdown = getDaysUntil(ev.startDate);
+                          const isHoli = Boolean(ev.isHoliday);
+                          const dateObj = new Date(ev.startDate + 'T00:00:00');
+                          const monthShort = dateObj.toLocaleString('en-US', { month: 'short' }).toUpperCase();
+                          const dayNum = dateObj.getDate();
+
+                          return (
+                            <div
+                              key={ev.id}
+                              className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-[#e5ebe7] bg-white p-3.5 shadow-2xs hover:border-[#9fc5ac] transition"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                {/* Date Badge Box */}
+                                <div className={`flex h-12 w-12 shrink-0 flex-col items-center justify-center rounded-xl border ${
+                                  isHoli ? 'border-emerald-200 bg-emerald-50 text-emerald-900' : 'border-[#dce5df] bg-[#f5f8f6] text-[#2c3d36]'
+                                }`}>
+                                  <span className="text-[9px] font-extrabold uppercase leading-none">{monthShort}</span>
+                                  <span className="font-display text-[16px] font-extrabold leading-tight">{dayNum}</span>
+                                </div>
+
+                                <div className="min-w-0 flex-1">
+                                  <div className="flex flex-wrap items-center gap-2">
+                                    <h5 className="font-bold text-[13px] text-[#2c3d36] truncate">{ev.title}</h5>
+                                    <span className={`inline-flex items-center gap-1 rounded-md px-2 py-0.5 text-[9px] font-extrabold ${
+                                      isHoli ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                                    }`}>
+                                      {isHoli ? <PartyPopper size={10} /> : <Calendar size={10} />}
+                                      {ev.type || (isHoli ? 'Holiday' : 'Event')}
+                                    </span>
+                                    <span className={`rounded-full px-2 py-0.5 text-[9px] font-extrabold ${
+                                      countdown.tone === 'green' ? 'bg-emerald-100 text-emerald-800' : countdown.tone === 'amber' ? 'bg-amber-100 text-amber-800' : 'bg-[#eef2f0] text-[#556961]'
+                                    }`}>
+                                      {countdown.label}
+                                    </span>
+                                  </div>
+
+                                  <div className="mt-1 flex flex-wrap items-center gap-3 text-[11px] text-[#788882]">
+                                    <span className="flex items-center gap-1">
+                                      <CalendarDays size={12} className="text-[#84928d]" />
+                                      {dateLabel(ev.startDate)}
+                                      {ev.endDate && ev.endDate !== ev.startDate ? ` – ${dateLabel(ev.endDate)}` : ''}
+                                    </span>
+                                    {ev.location && (
+                                      <span className="flex items-center gap-1">
+                                        <MapPin size={11} className="text-[#84928d]" />
+                                        {ev.location}
+                                      </span>
+                                    )}
+                                    {ev.uploadedBy && (
+                                      <span className="text-[10px] text-[#95a49e]">
+                                        Added by {ev.uploadedBy}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {ev.description && (
+                                    <p className="mt-1.5 text-[11px] leading-5 text-[#62736c]">{ev.description}</p>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 self-end sm:self-center shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedEventDetails(ev)}
+                                  className="rounded-lg border border-[#dce5e0] bg-white px-2.5 py-1 text-[11px] font-semibold text-[#485953] hover:bg-[#f2f7f4] transition"
+                                >
+                                  Details
+                                </button>
+                                {isAdmin && (
+                                  <>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setEditingEvent(ev);
+                                        setEventForm({
+                                          title: ev.title,
+                                          startDate: ev.startDate,
+                                          endDate: ev.endDate || ev.startDate,
+                                          type: ev.type || 'Holiday',
+                                          isHoliday: Boolean(ev.isHoliday),
+                                          description: ev.description || '',
+                                          location: ev.location || '',
+                                        });
+                                        setAddEventModalOpen(true);
+                                      }}
+                                      className="rounded-lg border border-[#dce5e0] p-1.5 text-[#5f6f69] hover:bg-[#edf5f0] hover:text-[#28785b] transition"
+                                      title="Edit Event"
+                                    >
+                                      <Pencil size={13} />
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDeleteEvent(ev)}
+                                      className="rounded-lg border border-[#dce5e0] p-1.5 text-[#5f6f69] hover:bg-rose-50 hover:text-rose-700 transition"
+                                      title="Delete Event"
+                                    >
+                                      <Trash2 size={13} />
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <Empty
+                  title="No upcoming events found"
+                  detail={calSearch ? 'No calendar events match your search term.' : 'No company events or holidays are scheduled right now.'}
+                  button={isAdmin && (
+                    <Btn onClick={() => setUploadModalOpen(true)}>
+                      <Upload size={13} /> Upload Company Calendar
+                    </Btn>
+                  )}
+                />
+              )}
+            </div>
+          )}
+        </Card>
+
+        {/* Modal: Admin Upload Company Calendar */}
+        {uploadModalOpen && (
+          <Dialog title="Upload Company Calendar (.ics / CSV)" onClose={() => setUploadModalOpen(false)}>
+            <form onSubmit={handleSubmitUpload} className="space-y-4 p-5">
+              <p className="text-[12px] leading-5 text-[#63736e]">
+                Upload an exported calendar file (<strong>.ics / iCalendar</strong> from Google Calendar, Outlook, Apple Calendar, or <strong>.csv</strong>). All company holidays and events will be extracted and attached to this platform for all employees to see.
+              </p>
+
+              {/* Drag and Drop Zone */}
+              <div
+                onDragOver={e => { e.preventDefault(); setIsDragging(true); }}
+                onDragLeave={() => setIsDragging(false)}
+                onDrop={e => {
+                  e.preventDefault();
+                  setIsDragging(false);
+                  if (e.dataTransfer.files && e.dataTransfer.files[0]) {
+                    handleFileSelected(e.dataTransfer.files[0]);
+                  }
+                }}
+                className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition ${
+                  isDragging
+                    ? 'border-[#28785b] bg-[#edf6f1]'
+                    : 'border-[#ccd8d1] bg-[#fbfcfb] hover:border-[#a0c5b0] hover:bg-white'
+                }`}
+              >
+                <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#edf5f0] text-[#347b56] mb-2">
+                  <Upload size={20} />
+                </div>
+                <p className="text-[13px] font-bold text-[#2d3e38]">
+                  {uploadFileName ? uploadFileName : 'Drop calendar file here or click to browse'}
+                </p>
+                <p className="mt-1 text-[11px] text-[#7e8f88]">
+                  Supports standard <strong>.ics</strong> (iCalendar) and <strong>.csv</strong> files
+                </p>
+
+                <input
+                  type="file"
+                  accept=".ics,.csv,.json,text/calendar,text/csv"
+                  onChange={e => {
+                    if (e.target.files && e.target.files[0]) {
+                      handleFileSelected(e.target.files[0]);
+                    }
+                  }}
+                  className="mt-3 text-[11px] text-[#4d5d57] file:mr-3 file:rounded-lg file:border-0 file:bg-[#28785b] file:px-3 file:py-1.5 file:text-[11px] file:font-bold file:text-white hover:file:bg-[#21634b]"
+                />
+              </div>
+
+              {/* Extraction Preview */}
+              {uploadPreview && (
+                <div className="rounded-xl border border-[#dce5df] bg-white p-3.5 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[12px] font-bold text-[#273a33]">
+                      Extracted Preview ({uploadPreview.length} items found)
+                    </span>
+                    <span className="text-[10px] font-bold text-[#28785b] bg-[#eef6f1] px-2 py-0.5 rounded-md">
+                      {uploadPreview.filter(p => p.isHoliday).length} Holidays · {uploadPreview.filter(p => !p.isHoliday).length} Events
+                    </span>
+                  </div>
+
+                  <div className="max-h-48 overflow-y-auto divide-y divide-[#f0f3f1] border-t border-[#edf0ee] pt-1">
+                    {uploadPreview.slice(0, 10).map((p, idx) => (
+                      <div key={idx} className="flex items-center justify-between py-1.5 text-[11px]">
+                        <div className="min-w-0 pr-2">
+                          <p className="font-semibold text-[#32423c] truncate">{p.title}</p>
+                          <p className="text-[9px] text-[#86958e]">{p.startDate} {p.location ? `· ${p.location}` : ''}</p>
+                        </div>
+                        <span className={`shrink-0 rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                          p.isHoliday ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                        }`}>
+                          {p.type}
+                        </span>
+                      </div>
+                    ))}
+                    {uploadPreview.length > 10 && (
+                      <p className="pt-1.5 text-center text-[10px] font-semibold text-[#7e8f88]">
+                        ... and {uploadPreview.length - 10} more items will be attached
+                      </p>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {/* Replace existing option */}
+              <label className="flex cursor-pointer items-start gap-2.5 rounded-lg border border-[#e2e8e4] bg-[#fafcfb] p-3 text-[12px]">
+                <input
+                  type="checkbox"
+                  checked={uploadReplace}
+                  onChange={e => setUploadReplace(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#28785b] focus:ring-[#28785b]"
+                />
+                <div>
+                  <span className="font-bold text-[#2e3f39]">Replace existing company calendar</span>
+                  <p className="text-[11px] text-[#768680]">
+                    If checked, existing calendar entries for your workspace will be replaced by this upload.
+                  </p>
+                </div>
+              </label>
+
+              {/* Quick Preset Alternative */}
+              <div className="flex items-center justify-between rounded-lg border border-[#d6e4dc] bg-[#edf6f1] p-3">
+                <div>
+                  <p className="text-[12px] font-bold text-[#274635]">Quick Setup: Official 2026/2027 Calendar</p>
+                  <p className="text-[10px] text-[#52705f]">Don't have an .ics file ready? Initialize with official public holidays and company milestones in 1 click.</p>
+                </div>
+                <Btn kind="soft" type="button" onClick={handleSeedHolidays} disabled={uploading}>
+                  <Sparkles size={12} /> Load Preset
+                </Btn>
+              </div>
+
+              <div className="flex items-center justify-between border-t border-[#edf0ee] pt-4">
+                <Btn kind="outline" type="button" onClick={() => setUploadModalOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={uploading || !uploadContent}>
+                  {uploading ? 'Extracting & Saving…' : 'Attach to CRM & Publish for Employees'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+
+        {/* Modal: Add or Edit Event (Admin) */}
+        {addEventModalOpen && (
+          <Dialog title={editingEvent ? 'Edit Calendar Event' : 'Add Company Event or Holiday'} onClose={() => setAddEventModalOpen(false)}>
+            <form onSubmit={handleSaveEvent} className="space-y-3.5 p-5">
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Event / Holiday Title *
+                  <input
+                    required
+                    type="text"
+                    value={eventForm.title}
+                    onChange={e => setEventForm(f => ({ ...f, title: e.target.value }))}
+                    placeholder="e.g. Christmas Day, Q4 All-Hands, Team Hackathon"
+                    className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                  />
+                </label>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[12px] font-bold text-[#354641]">
+                    Start Date *
+                    <input
+                      required
+                      type="date"
+                      value={eventForm.startDate}
+                      onChange={e => setEventForm(f => ({ ...f, startDate: e.target.value }))}
+                      className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                    />
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-bold text-[#354641]">
+                    End Date (Optional)
+                    <input
+                      type="date"
+                      value={eventForm.endDate}
+                      onChange={e => setEventForm(f => ({ ...f, endDate: e.target.value }))}
+                      className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div>
+                  <label className="block text-[12px] font-bold text-[#354641]">
+                    Category / Type
+                    <select
+                      value={eventForm.type}
+                      onChange={e => {
+                        const val = e.target.value;
+                        setEventForm(f => ({
+                          ...f,
+                          type: val,
+                          isHoliday: val === 'Holiday',
+                        }));
+                      }}
+                      className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                    >
+                      <option value="Holiday">Official Holiday</option>
+                      <option value="All Hands">All Hands / Townhall</option>
+                      <option value="Company Event">Company Event</option>
+                      <option value="Milestone">Milestone / Launch</option>
+                      <option value="Off-site">Off-site / Retreat</option>
+                      <option value="Meeting">Meeting / Sync</option>
+                      <option value="Training">Training / Workshop</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </label>
+                </div>
+                <div>
+                  <label className="block text-[12px] font-bold text-[#354641]">
+                    Location (Optional)
+                    <input
+                      type="text"
+                      value={eventForm.location}
+                      onChange={e => setEventForm(f => ({ ...f, location: e.target.value }))}
+                      placeholder="e.g. Office Closed, Main Hall, Zoom"
+                      className="mt-1.5 w-full rounded-lg border border-[#dce5e0] bg-[#fbfcfb] px-3 py-2 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div>
+                <label className="flex cursor-pointer items-center gap-2 text-[12px] font-semibold text-[#354641]">
+                  <input
+                    type="checkbox"
+                    checked={eventForm.isHoliday}
+                    onChange={e => setEventForm(f => ({ ...f, isHoliday: e.target.checked }))}
+                    className="h-4 w-4 rounded border-gray-300 text-[#28785b] focus:ring-[#28785b]"
+                  />
+                  Mark as Company Public Holiday / Office Closed
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[12px] font-bold text-[#354641]">
+                  Description / Agenda (Optional)
+                  <textarea
+                    rows={3}
+                    value={eventForm.description}
+                    onChange={e => setEventForm(f => ({ ...f, description: e.target.value }))}
+                    placeholder="Provide details, timing, or holiday notes for the team…"
+                    className="mt-1.5 w-full resize-y rounded-lg border border-[#dce5e0] bg-[#fbfcfb] p-2.5 text-[12px] text-[#2d3d38] outline-none focus:border-[#70a88c]"
+                  />
+                </label>
+              </div>
+
+              <div className="flex justify-end gap-2 border-t border-[#edf0ee] pt-3">
+                <Btn kind="outline" type="button" onClick={() => setAddEventModalOpen(false)}>Cancel</Btn>
+                <Btn type="submit" disabled={savingEvent || !eventForm.title.trim()}>
+                  {savingEvent ? 'Saving…' : editingEvent ? 'Update Event' : 'Add to Calendar'}
+                </Btn>
+              </div>
+            </form>
+          </Dialog>
+        )}
+
+        {/* Modal: View Event Details */}
+        {selectedEventDetails && (
+          <Dialog title={selectedEventDetails.title} onClose={() => setSelectedEventDetails(null)}>
+            <div className="space-y-4 p-5">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[#edf0ee] pb-3">
+                <div className="flex items-center gap-2">
+                  <span className={`inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-[11px] font-extrabold ${
+                    selectedEventDetails.isHoliday ? 'bg-emerald-100 text-emerald-800' : 'bg-blue-100 text-blue-800'
+                  }`}>
+                    {selectedEventDetails.isHoliday ? <PartyPopper size={12} /> : <Calendar size={12} />}
+                    {selectedEventDetails.type || (selectedEventDetails.isHoliday ? 'Holiday' : 'Event')}
+                  </span>
+                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
+                    getDaysUntil(selectedEventDetails.startDate).tone === 'green'
+                      ? 'bg-emerald-100 text-emerald-800'
+                      : getDaysUntil(selectedEventDetails.startDate).tone === 'amber'
+                      ? 'bg-amber-100 text-amber-800'
+                      : 'bg-[#eef2f0] text-[#556961]'
+                  }`}>
+                    {getDaysUntil(selectedEventDetails.startDate).label}
+                  </span>
+                </div>
+
+                {isAdmin && (
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const ev = selectedEventDetails;
+                        setSelectedEventDetails(null);
+                        setEditingEvent(ev);
+                        setEventForm({
+                          title: ev.title,
+                          startDate: ev.startDate,
+                          endDate: ev.endDate || ev.startDate,
+                          type: ev.type || 'Holiday',
+                          isHoliday: Boolean(ev.isHoliday),
+                          description: ev.description || '',
+                          location: ev.location || '',
+                        });
+                        setAddEventModalOpen(true);
+                      }}
+                      className="rounded-lg border border-[#dce5e0] p-1.5 text-[#5f6f69] hover:bg-[#edf5f0] hover:text-[#28785b] transition"
+                      title="Edit Event"
+                    >
+                      <Pencil size={13} />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteEvent(selectedEventDetails)}
+                      className="rounded-lg border border-[#dce5e0] p-1.5 text-[#5f6f69] hover:bg-rose-50 hover:text-rose-700 transition"
+                      title="Delete Event"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-3 text-[12px] text-[#4f5f59]">
+                <div className="flex items-center gap-2">
+                  <CalendarDays size={15} className="text-[#28785b] shrink-0" />
+                  <span>
+                    <strong>Date:</strong> {dateLabel(selectedEventDetails.startDate)}
+                    {selectedEventDetails.endDate && selectedEventDetails.endDate !== selectedEventDetails.startDate
+                      ? ` – ${dateLabel(selectedEventDetails.endDate)}`
+                      : ''}
+                  </span>
+                </div>
+
+                {selectedEventDetails.location && (
+                  <div className="flex items-center gap-2">
+                    <MapPin size={15} className="text-[#28785b] shrink-0" />
+                    <span><strong>Location:</strong> {selectedEventDetails.location}</span>
+                  </div>
+                )}
+
+                {selectedEventDetails.description && (
+                  <div className="rounded-xl border border-[#e8eeea] bg-[#fafbfa] p-3 text-[12px] leading-6 text-[#45544e]">
+                    {selectedEventDetails.description}
+                  </div>
+                )}
+
+                {selectedEventDetails.uploadedBy && (
+                  <p className="text-[10px] text-[#93a19b]">
+                    Attached by <strong>{selectedEventDetails.uploadedBy}</strong>
+                    {selectedEventDetails.sourceFileName ? ` from ${selectedEventDetails.sourceFileName}` : ''}
+                  </p>
+                )}
+              </div>
+
+              <div className="flex justify-end border-t border-[#edf0ee] pt-3">
+                <Btn kind="outline" onClick={() => setSelectedEventDetails(null)}>Close</Btn>
+              </div>
+            </div>
+          </Dialog>
+        )}
+      </div>
+    );
+  }
+
   function SupportPage() {
     const isSuperAdmin = member?.role === 'super_admin';
     const [supportFilter, setSupportFilter] = useState<string>('all');
@@ -3910,6 +5140,7 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
     case '/deals': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <ResourcePage entity="deals" />; break;
     case '/tasks': content = <ResourcePage entity="tasks" />; break;
     case '/notes': content = <NotesPage />; break;
+    case '/calendar': content = <CalendarPage />; break;
     case '/analytics': content = <Redirect to={member?.role === 'super_admin' ? '/super-admin' : '/dashboard'} />; break;
     case '/team': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <Team />; break;
     case '/inbox': content = member?.role === 'super_admin' ? <Redirect to="/super-admin" /> : <InboxPage />; break;
