@@ -3683,29 +3683,24 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
       }
     };
 
-    // 1-Click Seed Official Holidays
-    const handleSeedHolidays = async () => {
-      if (!window.confirm('Initialize company calendar with official 2026/2027 holidays and company milestones?')) return;
-      setUploading(true);
+    // Clear all company calendar events (Admin only)
+    const handleClearAllEvents = async () => {
+      if (!window.confirm('Delete all company calendar events and holidays? This action cannot be undone.')) return;
       try {
-        const res = await fetch('/api/calendar/seed-holidays', {
-          method: 'POST',
+        const res = await fetch('/api/calendar/events', {
+          method: 'DELETE',
           credentials: 'include',
         });
-        const data = await res.json();
         if (res.ok) {
-          setNotice({ tone: 'good', text: data.message || 'Official company holidays loaded!' });
-          setUploadModalOpen(false);
+          setNotice({ tone: 'good', text: 'All calendar events cleared.' });
           qc.invalidateQueries({ queryKey: ['speedmatch-calendar'] });
           qc.invalidateQueries({ queryKey: ['speedmatch-calendar-dash'] });
           qc.invalidateQueries({ queryKey: getGetDashboardActivityQueryKey() });
         } else {
-          setNotice({ tone: 'bad', text: data.error || 'Failed to load official holidays.' });
+          setNotice({ tone: 'bad', text: 'Failed to clear calendar events.' });
         }
       } catch {
         setNotice({ tone: 'bad', text: 'Could not connect to calendar service.' });
-      } finally {
-        setUploading(false);
       }
     };
 
@@ -3870,6 +3865,11 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                   <Btn kind="outline" onClick={handleExportCalendar} title="Export calendar to CSV">
                     <Download size={13} /> Export CSV
                   </Btn>
+                  {eventsList.length > 0 && (
+                    <Btn kind="outline" onClick={handleClearAllEvents} title="Clear all calendar events">
+                      <Trash2 size={13} /> Clear Calendar
+                    </Btn>
+                  )}
                 </>
               ) : (
                 <>
@@ -3993,11 +3993,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                 />
               </div>
 
-              {isAdmin && eventsList.length === 0 && (
-                <Btn kind="soft" onClick={handleSeedHolidays} disabled={uploading}>
-                  <Sparkles size={13} /> 1-Click Load Official Holidays
-                </Btn>
-              )}
             </div>
           </div>
 
@@ -4352,17 +4347,6 @@ function Workspace({ path, member }: { path: string; member: AnyRecord }) {
                   </p>
                 </div>
               </label>
-
-              {/* Quick Preset Alternative */}
-              <div className="flex items-center justify-between rounded-lg border border-[#d6e4dc] bg-[#edf6f1] p-3">
-                <div>
-                  <p className="text-[12px] font-bold text-[#274635]">Quick Setup: Official 2026/2027 Calendar</p>
-                  <p className="text-[10px] text-[#52705f]">Don't have an .ics file ready? Initialize with official public holidays and company milestones in 1 click.</p>
-                </div>
-                <Btn kind="soft" type="button" onClick={handleSeedHolidays} disabled={uploading}>
-                  <Sparkles size={12} /> Load Preset
-                </Btn>
-              </div>
 
               <div className="flex items-center justify-between border-t border-[#edf0ee] pt-4">
                 <Btn kind="outline" type="button" onClick={() => setUploadModalOpen(false)}>Cancel</Btn>
